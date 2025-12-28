@@ -47,11 +47,11 @@ RUN mkdir -p /var/log
 
 RUN cat > /root/get_management_key.sh << 'EOF'
 #!/bin/bash
-# 获取 MANAGEMENT_KEY，优先使用环境变量，否则从配置文件读取
+# 获取 MANAGEMENT_PASSWORD，优先使用环境变量，否则从配置文件读取
 # 支持的配置文件位置: /data/config/config.yaml, /data/config.yaml
 
-if [ -n "${MANAGEMENT_KEY:-}" ]; then
-    echo "$MANAGEMENT_KEY"
+if [ -n "${MANAGEMENT_PASSWORD:-}" ]; then
+    echo "$MANAGEMENT_PASSWORD"
 else
     # 定义可能的配置文件位置
     CONFIG_PATHS=(
@@ -86,12 +86,12 @@ EXPORT_FILE="${DATA_DIR}/usage_data.json"
 BACKUP_FILE="${EXPORT_FILE}.bak"
 TEMP_FILE="${EXPORT_FILE}.tmp"
 
-# 获取 MANAGEMENT_KEY
-MANAGEMENT_KEY=$(bash /root/get_management_key.sh)
+# 获取 MANAGEMENT_PASSWORD
+MANAGEMENT_PASSWORD=$(bash /root/get_management_key.sh)
 
 # 检查环境变量
-if [ -z "$MANAGEMENT_KEY" ]; then
-    echo "错误: 未设置 MANAGEMENT_KEY 环境变量，也未在配置文件中找到 secret-key"
+if [ -z "$MANAGEMENT_PASSWORD" ]; then
+    echo "错误: 未设置 MANAGEMENT_PASSWORD 环境变量，也未在配置文件中找到 secret-key"
     exit 1
 fi
 
@@ -109,7 +109,7 @@ echo "正在导出使用数据..."
 echo "目标文件: $EXPORT_FILE"
 
 HTTP_CODE=$(curl -X GET "${API_BASE_URL}/v0/management/usage/export" \
-    -H "Authorization: Bearer ${MANAGEMENT_KEY}" \
+    -H "Authorization: Bearer ${MANAGEMENT_PASSWORD}" \
     -o "$TEMP_FILE" \
     -w "%{http_code}" \
     -s)
@@ -177,12 +177,12 @@ API_BASE_URL="${API_BASE_URL:-http://localhost:8317}"
 DATA_DIR="/data/config"
 IMPORT_FILE="${DATA_DIR}/usage_data.json"
 
-# 获取 MANAGEMENT_KEY
-MANAGEMENT_KEY=$(bash /root/get_management_key.sh)
+# 获取 MANAGEMENT_PASSWORD
+MANAGEMENT_PASSWORD=$(bash /root/get_management_key.sh)
 
 # 检查环境变量
-if [ -z "$MANAGEMENT_KEY" ]; then
-    echo "错误: 未设置 MANAGEMENT_KEY 环境变量，也未在配置文件中找到 secret-key"
+if [ -z "$MANAGEMENT_PASSWORD" ]; then
+    echo "错误: 未设置 MANAGEMENT_PASSWORD 环境变量，也未在配置文件中找到 secret-key"
     exit 1
 fi
 
@@ -218,7 +218,7 @@ echo "大小: ${FILE_SIZE_KB}KB (${FILE_SIZE} bytes)"
 
 # 导入数据
 RESPONSE=$(curl -X POST "${API_BASE_URL}/v0/management/usage/import" \
-    -H "Authorization: Bearer ${MANAGEMENT_KEY}" \
+    -H "Authorization: Bearer ${MANAGEMENT_PASSWORD}" \
     -H "Content-Type: application/json" \
     -d @"$IMPORT_FILE" \
     -w "\n%{http_code}" \
@@ -338,5 +338,6 @@ wait $MAIN_PID
 EOF
 
 RUN chmod +x /root/get_management_key.sh /root/export_usage.sh /root/import_usage.sh /root/cleanup-logs.sh /root/start.sh
+
 
 CMD ["/bin/bash", "/root/start.sh"]
