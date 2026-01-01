@@ -81,7 +81,7 @@ set -euo pipefail
 
 # 配置
 API_BASE_URL="${API_BASE_URL:-http://localhost:8317}"
-DATA_DIR="/data/config"
+DATA_DIR="/data"
 EXPORT_FILE="${DATA_DIR}/usage_data.json"
 BACKUP_FILE="${EXPORT_FILE}.bak"
 TEMP_FILE="${EXPORT_FILE}.tmp"
@@ -174,7 +174,7 @@ set -euo pipefail
 
 # 配置
 API_BASE_URL="${API_BASE_URL:-http://localhost:8317}"
-DATA_DIR="/data/config"
+DATA_DIR="/data"
 IMPORT_FILE="${DATA_DIR}/usage_data.json"
 
 # 获取 MANAGEMENT_PASSWORD
@@ -253,8 +253,8 @@ RUN cat > /root/cleanup-logs.sh << 'EOF'
 # 日志清理脚本 - 删除超过7天的日志文件
 # 使用方法: ./cleanup-logs.sh
 
-LOG_DIR="/data/config/logs"
-DAYS=7
+LOG_DIR="/data/logs"
+DAYS=3
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo "[$TIMESTAMP] 开始清理日志文件..."
@@ -292,9 +292,19 @@ echo "root:${SSH_PASSWORD}" | chpasswd
 # 启动 SSH 服务
 /usr/sbin/sshd
 
-# 启动主应用（后台运行）
-/CLIProxyAPI/CLIProxyAPIPlus --config /data/config/config.yaml &
-MAIN_PID=$!
+#首次启动检查config.yaml文件
+if [ -f "/data/config.yaml" ]; then
+    echo "检测到 config.yaml，启动主应用"
+    /CLIProxyAPI/CLIProxyAPIPlus --config /data/config.yaml &
+    MAIN_PID=$!
+else
+    if [ ! -f "/data/config.yaml" ]; then
+        echo "⚠️  /data/config.yaml 不存在，复制config.yaml,再启动程序"
+        cp config.example.yaml /data/config.yaml
+        /CLIProxyAPI/CLIProxyAPIPlus --config /data/config.yaml &
+        MAIN_PID=$!
+    fi
+fi
 
 # 等待主程序启动成功（等待 8317 端口就绪）
 echo "等待主程序启动..."
@@ -312,11 +322,11 @@ for i in $(seq 1 30); do
 done
 
 # 运行 import_usage.sh 脚本（仅当 usage_data.json 存在时）
-if [ -f "/root/import_usage.sh" ] && [ -f "/data/config/usage_data.json" ]; then
+if [ -f "/root/import_usage.sh" ] && [ -f "/data/usage_data.json" ]; then
     echo "检测到 usage_data.json，运行 import_usage.sh..."
     /root/import_usage.sh
 else
-    if [ ! -f "/data/config/usage_data.json" ]; then
+    if [ ! -f "/data/usage_data.json" ]; then
         echo "⚠️  usage_data.json 不存在，跳过 import_usage.sh"
     fi
 fi
@@ -341,3 +351,4 @@ RUN chmod +x /root/get_management_key.sh /root/export_usage.sh /root/import_usag
 
 
 CMD ["/bin/bash", "/root/start.sh"]
+
