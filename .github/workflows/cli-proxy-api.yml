@@ -1,4 +1,4 @@
-name: 更新cli-proxy-api-plus镜像版本
+name: 更新cli-proxy-api镜像版本
 
 on:
   schedule:
@@ -13,14 +13,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: cli-proxy-api-plus
+          ref: cli-proxy-api
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get latest image tag
         id: get-version
         run: |
           # 使用 Docker Hub API 获取最新标签信息
-          RESPONSE=$(curl -s https://hub.docker.com/v2/repositories/eceasy/cli-proxy-api-plus/tags?page_size=1)
+          RESPONSE=$(curl -s https://hub.docker.com/v2/repositories/eceasy/cli-proxy-api/tags?page_size=1)
           
           # 提取版本号
           VERSION=$(echo $RESPONSE | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -47,5 +47,5 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore: update version to ${{ steps.get-version.outputs.version }}"
-            git push origin cli-proxy-api-plus
+            git push origin cli-proxy-api
           fi
