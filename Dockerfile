@@ -259,13 +259,13 @@ echo "root:${SSH_PASSWORD}" | chpasswd
 #首次启动检查config.yaml文件
 if [ -f "/data/config.yaml" ]; then
     echo "检测到 config.yaml，启动主应用"
-    /CLIProxyAPI/CLIProxyAPIPlus --config /data/config.yaml &
+    /CLIProxyAPI/CLIProxyAPI --config /data/config.yaml &
     MAIN_PID=$!
 else
     if [ ! -f "/data/config.yaml" ]; then
         echo "⚠️  /data/config.yaml 不存在，复制config.yaml,再启动程序"
         cp config.example.yaml /data/config.yaml
-        /CLIProxyAPI/CLIProxyAPIPlus --config /data/config.yaml &
+        /CLIProxyAPI/CLIProxyAPI --config /data/config.yaml &
         MAIN_PID=$!
     fi
 fi
@@ -315,6 +315,7 @@ RUN chmod +x /root/get_management_key.sh /root/export_usage.sh /root/import_usag
 
 
 CMD ["/bin/bash", "/root/start.sh"]
+
 
 
 
