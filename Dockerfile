@@ -1,4 +1,4 @@
-FROM eceasy/cli-proxy-api-plus:latest
+FROM eceasy/cli-proxy-api:latest
 LABEL "language"="docker"
 
 RUN apk add --no-cache dcron jq curl netcat-openbsd bash
@@ -315,5 +315,6 @@ RUN chmod +x /root/get_management_key.sh /root/export_usage.sh /root/import_usag
 
 
 CMD ["/bin/bash", "/root/start.sh"]
+
 
 
