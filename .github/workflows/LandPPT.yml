@@ -1,0 +1,71 @@
+name: landppt
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set lowercase owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      - name: Checkout upstream repo
+        uses: actions/checkout@v4
+        with:
+          repository: sligter/LandPPT
+          ref: main
+          path: upstream
+
+      - name: Get upstream short SHA
+        run: |
+          cd upstream
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "VERSION=${SHORT_SHA}" >> $GITHUB_ENV
+          echo "Upstream VERSION=${SHORT_SHA}"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if this VERSION already exists in GHCR
+        run: |
+          set -e
+          IMAGE="ghcr.io/${OWNER_LC}/landppt:${VERSION}"
+
+          echo "Checking remote manifest: ${IMAGE}"
+          if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
+            echo "Image for ${VERSION} already exists. Skip build."
+            echo "SKIP_BUILD=true" >> $GITHUB_ENV
+          else
+            echo "Image for ${VERSION} not found. Will build."
+            echo "SKIP_BUILD=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build multi-architecture image
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          IMAGE_BASE="ghcr.io/${OWNER_LC}/landppt"
+          docker buildx create --use # Create a new buildx builder if not already created
+          docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_BASE}:${VERSION} -t ${IMAGE_BASE}:latest ./upstream --push
+
+      - name: Push version tag
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          echo "Pushing version tag ${VERSION}"
+          docker push ghcr.io/${OWNER_LC}/landppt:${VERSION}
+
+      - name: Push latest tag
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          echo "Pushing latest tag"
+          docker push ghcr.io/${OWNER_LC}/landppt:latest
