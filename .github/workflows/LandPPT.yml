@@ -1,9 +1,9 @@
-name: landppt
+name: LandPPT
 
 on:
   schedule:
     - cron: "0 23 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,17 +12,20 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Set lowercase owner
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
+      # 拉取 upstream 仓库（自动使用默认分支）
       - name: Checkout upstream repo
         uses: actions/checkout@v4
         with:
           repository: sligter/LandPPT
-          ref: main
           path: upstream
+          fetch-depth: 1
 
+      # 获取 commit 版本号
       - name: Get upstream short SHA
         run: |
           cd upstream
@@ -30,6 +33,7 @@ jobs:
           echo "VERSION=${SHORT_SHA}" >> $GITHUB_ENV
           echo "Upstream VERSION=${SHORT_SHA}"
 
+      # 登录 GHCR
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -37,35 +41,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if this VERSION already exists in GHCR
+      # 检查镜像是否已经存在
+      - name: Check if image exists
         run: |
-          set -e
           IMAGE="ghcr.io/${OWNER_LC}/landppt:${VERSION}"
 
-          echo "Checking remote manifest: ${IMAGE}"
+          echo "Checking ${IMAGE}"
+
           if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
-            echo "Image for ${VERSION} already exists. Skip build."
             echo "SKIP_BUILD=true" >> $GITHUB_ENV
+            echo "Image already exists, skip build."
           else
-            echo "Image for ${VERSION} not found. Will build."
             echo "SKIP_BUILD=false" >> $GITHUB_ENV
+            echo "Image not found, will build."
           fi
 
-      - name: Build multi-architecture image
+      # 设置 buildx
+      - name: Setup Docker Buildx
         if: env.SKIP_BUILD != 'true'
-        run: |
-          IMAGE_BASE="ghcr.io/${OWNER_LC}/landppt"
-          docker buildx create --use # Create a new buildx builder if not already created
-          docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_BASE}:${VERSION} -t ${IMAGE_BASE}:latest ./upstream --push
+        uses: docker/setup-buildx-action@v3
 
-      - name: Push version tag
+      # 构建并推送
+      - name: Build and push image
         if: env.SKIP_BUILD != 'true'
-        run: |
-          echo "Pushing version tag ${VERSION}"
-          docker push ghcr.io/${OWNER_LC}/landppt:${VERSION}
-
-      - name: Push latest tag
-        if: env.SKIP_BUILD != 'true'
-        run: |
-          echo "Pushing latest tag"
-          docker push ghcr.io/${OWNER_LC}/landppt:latest
+        uses: docker/build-push-action@v5
+        with:
+          context: ./upstream
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/landppt:${{ env.VERSION }}
+            ghcr.io/${{ env.OWNER_LC }}/landppt:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
