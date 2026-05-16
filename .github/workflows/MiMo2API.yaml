@@ -23,73 +23,65 @@ jobs:
 
     steps:
 
-      # =========================
-      # 1. 获取最新 tag（安全版）
-      # =========================
-      - name: Get Latest Valid Tag
+      # 获取最新 tag
+      - name: Get Latest Tag
         id: tag
         run: |
-          TAG=$(curl -s "https://api.github.com/repos/Fly143/MiMo2API/tags?per_page=100" \
-            | jq -r '.[].name' \
-            | grep -v 'no-tools' \
-            | grep -v 'NO-TOOLS' \
-            | head -n 1)
+          RAW_TAG=$(curl -s "https://api.github.com/repos/${{ env.REPO }}/releases/latest" \
+            | jq -r '.tag_name')
 
-          if [ -z "$TAG" ]; then
-            echo "ERROR: no valid tag found"
+          if [ -z "$RAW_TAG" ] || [ "$RAW_TAG" = "null" ]; then
+            echo "Failed to get latest tag"
             exit 1
           fi
 
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Selected tag: $TAG"
+          # 去掉 -no-tools
+          TAG=$(echo "$RAW_TAG" | sed 's/-no-tools//g')
 
-      # =========================
-      # 2. 小写用户名
-      # =========================
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          echo "Raw tag: $RAW_TAG"
+          echo "Final tag: $TAG"
+
+      # 用户名转小写
       - name: Lowercase Username
         id: lower
         run: |
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # =========================
-      # 3. 检查 GHCR 是否已有该 tag
-      # =========================
+      # 检查镜像是否已存在
       - name: Check Existing Image
         id: check
         run: |
           IMAGE="ghcr.io/${{ steps.lower.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
 
-          if docker manifest inspect $IMAGE > /dev/null 2>&1; then
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image exists, skip build"
+            echo "Image already exists"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Image not exists"
           fi
 
-      # =========================
-      # 4. checkout main（永远构建 main）
-      # =========================
-      - name: Checkout main
+      # 拉取 main
+      - name: Checkout Main
         if: steps.check.outputs.exists != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.REPO }}
           ref: main
 
-      # =========================
-      # 5. docker build 环境
-      # =========================
+      # QEMU
       - name: Set up QEMU
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up Buildx
+      # Buildx
+      - name: Set up Docker Buildx
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
 
-      # =========================
-      # 6. 登录 GHCR
-      # =========================
+      # 登录 GHCR
       - name: Login GHCR
         if: steps.check.outputs.exists != 'true'
         uses: docker/login-action@v3
@@ -98,32 +90,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # =========================
-      # 7. 自动定位 Dockerfile（关键修复点）
-      # =========================
+      # 自动寻找 Dockerfile
       - name: Find Dockerfile
-        id: df
+        id: dockerfile
         if: steps.check.outputs.exists != 'true'
         run: |
           FILE=$(find . -name Dockerfile | head -n 1)
 
           if [ -z "$FILE" ]; then
-            echo "ERROR: Dockerfile not found"
+            echo "Dockerfile not found"
             exit 1
           fi
 
           echo "file=$FILE" >> $GITHUB_OUTPUT
+
           echo "Dockerfile: $FILE"
 
-      # =========================
-      # 8. Build & Push
-      # =========================
-      - name: Build and Push MultiArch
+      # 构建并推送
+      - name: Build and Push
         if: steps.check.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ steps.df.outputs.file }}
+          file: ${{ steps.dockerfile.outputs.file }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
