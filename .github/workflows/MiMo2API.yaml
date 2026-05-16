@@ -22,7 +22,7 @@ jobs:
       packages: write
 
     steps:
-      # 获取最新非 no-tools 的 tag
+      # 获取最新非 no-tools tag
       - name: Get Latest Valid Tag
         id: tag
         run: |
@@ -34,38 +34,42 @@ jobs:
             | head -n 1)
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-
           echo "Selected tag: $TAG"
 
-      # GitHub 用户名转小写
+      # 用户名转小写
       - name: Lowercase Username
         id: lower
         run: |
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # 检查镜像是否已经存在
+      # 检查镜像是否已存在
       - name: Check Existing Image
         id: check
         run: |
           IMAGE="ghcr.io/${{ steps.lower.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
 
-          echo "Checking image: $IMAGE"
-
           if docker manifest inspect $IMAGE > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image already exists, skip build"
+            echo "Image already exists"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Image not found, continue build"
+            echo "Image not exists"
           fi
 
-      # 拉取远程仓库指定 tag
-      - name: Checkout Remote Repository
+      # 下载 tag zip
+      - name: Download Source Code
         if: steps.check.outputs.exists != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.REPO }}
-          ref: ${{ steps.tag.outputs.tag }}
+        run: |
+          wget -O source.zip \
+            https://github.com/${{ env.REPO }}/archive/refs/tags/${{ steps.tag.outputs.tag }}.zip
+
+          unzip source.zip
+
+      # 重命名目录
+      - name: Prepare Source
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          mv MiMo2API-* source
 
       # QEMU
       - name: Set up QEMU
@@ -86,13 +90,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 构建并推送多架构镜像
-      - name: Build and Push MultiArch
+      # 构建并推送
+      - name: Build and Push
         if: steps.check.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./source
+          file: ./source/docker/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
