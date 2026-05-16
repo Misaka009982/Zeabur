@@ -22,7 +22,7 @@ jobs:
       packages: write
 
     steps:
-      # 获取最新非 no-tools tag
+      # 1. 获取最新有效 tag（排除 no-tools）
       - name: Get Latest Valid Tag
         id: tag
         run: |
@@ -36,13 +36,13 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Selected tag: $TAG"
 
-      # 用户名转小写
+      # 2. 用户名小写
       - name: Lowercase Username
         id: lower
         run: |
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # 检查镜像是否已存在
+      # 3. 检查镜像是否已存在（用 digest 更准确）
       - name: Check Existing Image
         id: check
         run: |
@@ -50,38 +50,25 @@ jobs:
 
           if docker manifest inspect $IMAGE > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image already exists"
+            echo "Image exists, skip"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Image not exists"
           fi
 
-      # 下载 tag zip
-      - name: Download Source Code
+      # 4. checkout（只用来拿 git 工具环境，不拉源码）
+      - uses: actions/checkout@v4
         if: steps.check.outputs.exists != 'true'
-        run: |
-          wget -O source.zip \
-            https://github.com/${{ env.REPO }}/archive/refs/tags/${{ steps.tag.outputs.tag }}.zip
 
-          unzip source.zip
-
-      # 重命名目录
-      - name: Prepare Source
-        if: steps.check.outputs.exists != 'true'
-        run: |
-          mv MiMo2API-* source
-
-      # QEMU
+      # 5. 设置 docker
       - name: Set up QEMU
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-qemu-action@v3
 
-      # Buildx
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
 
-      # 登录 GHCR
+      # 6. 登录 GHCR
       - name: Login GHCR
         if: steps.check.outputs.exists != 'true'
         uses: docker/login-action@v3
@@ -90,13 +77,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 构建并推送
+      # 7. git archive 拉源码（关键）
+      - name: Fetch source via git archive
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          git clone --bare https://github.com/${{ env.REPO }} repo.git
+          cd repo.git
+
+          git archive --format=tar ${{ steps.tag.outputs.tag }} | tar -x -C ..
+
+          cd ..
+          rm -rf repo.git
+
+          echo "SOURCE=." >> $GITHUB_ENV
+
+      # 8. 构建并推送
       - name: Build and Push
         if: steps.check.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
-          context: ./source
-          file: ./source/docker/Dockerfile
+          context: ${{ env.SOURCE }}
+          file: ./docker/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
