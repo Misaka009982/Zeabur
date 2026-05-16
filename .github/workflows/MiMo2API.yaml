@@ -24,22 +24,27 @@ jobs:
     steps:
 
       # =========================
-      # 1. 获取最新 tag（按创建时间）
+      # 1. 获取最新 tag（安全版）
       # =========================
-      - name: Get Latest Valid Tag (by creatordate)
+      - name: Get Latest Valid Tag
         id: tag
         run: |
-          TAG=$(git ls-remote --tags --sort="-creatordate" https://github.com/${{ env.REPO }}.git \
-            | awk -F/ '{print $3}' \
-            | grep -v '\^{}' \
+          TAG=$(curl -s "https://api.github.com/repos/Fly143/MiMo2API/tags?per_page=100" \
+            | jq -r '.[].name' \
             | grep -v 'no-tools' \
+            | grep -v 'NO-TOOLS' \
             | head -n 1)
+
+          if [ -z "$TAG" ]; then
+            echo "ERROR: no valid tag found"
+            exit 1
+          fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Selected tag: $TAG"
 
       # =========================
-      # 2. 用户名小写
+      # 2. 小写用户名
       # =========================
       - name: Lowercase Username
         id: lower
@@ -47,7 +52,7 @@ jobs:
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       # =========================
-      # 3. 检查 GHCR 是否已存在
+      # 3. 检查 GHCR 是否已有该 tag
       # =========================
       - name: Check Existing Image
         id: check
@@ -56,13 +61,13 @@ jobs:
 
           if docker manifest inspect $IMAGE > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image already exists, skip build"
+            echo "Image exists, skip build"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
       # =========================
-      # 4. 拉取 main（永远构建 main）
+      # 4. checkout main（永远构建 main）
       # =========================
       - name: Checkout main
         if: steps.check.outputs.exists != 'true'
@@ -72,13 +77,13 @@ jobs:
           ref: main
 
       # =========================
-      # 5. QEMU + Buildx
+      # 5. docker build 环境
       # =========================
       - name: Set up QEMU
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
 
@@ -94,15 +99,21 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================
-      # 7. 自动定位 Dockerfile
+      # 7. 自动定位 Dockerfile（关键修复点）
       # =========================
       - name: Find Dockerfile
         id: df
         if: steps.check.outputs.exists != 'true'
         run: |
           FILE=$(find . -name Dockerfile | head -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: Dockerfile not found"
+            exit 1
+          fi
+
           echo "file=$FILE" >> $GITHUB_OUTPUT
-          echo "Dockerfile found: $FILE"
+          echo "Dockerfile: $FILE"
 
       # =========================
       # 8. Build & Push
