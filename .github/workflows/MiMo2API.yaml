@@ -3,7 +3,7 @@ name: Build MiMo2API
 on:
   workflow_dispatch:
   schedule:
-    - cron: '50 23 * * *'
+    - cron: '50 22 * * *'
 
 concurrency:
   group: mimo2api-build
@@ -22,82 +22,102 @@ jobs:
       packages: write
 
     steps:
-      # 1. 获取最新有效 tag（排除 no-tools）
-      - name: Get Latest Valid Tag
+      # =========================
+      # 1. 获取最新 tag（仅做版本判断）
+      # =========================
+      - name: Get Latest Tag
         id: tag
         run: |
           TAG=$(git ls-remote --tags --sort='version:refname' https://github.com/${{ env.REPO }}.git \
             | awk -F/ '{print $3}' \
             | grep -v '\^{}' \
-            | tac \
             | grep -v 'no-tools' \
-            | head -n 1)
+            | tail -n 1)
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Selected tag: $TAG"
+          echo "Latest tag: $TAG"
 
+      # =========================
       # 2. 用户名小写
+      # =========================
       - name: Lowercase Username
         id: lower
         run: |
           echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      # 3. 检查镜像是否已存在（用 digest 更准确）
-      - name: Check Existing Image
-        id: check
+      # =========================
+      # 3. 获取 GHCR 最新版本
+      # =========================
+      - name: Check remote image version
+        id: remote
         run: |
-          IMAGE="ghcr.io/${{ steps.lower.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
+          IMAGE="ghcr.io/${{ steps.lower.outputs.owner }}/${{ env.IMAGE_NAME }}"
 
-          if docker manifest inspect $IMAGE > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Image exists, skip"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+          DIGEST=$(docker manifest inspect $IMAGE:latest 2>/dev/null | sha256sum | awk '{print $1}' || echo "none")
 
-      # 4. checkout（只用来拿 git 工具环境，不拉源码）
-      - uses: actions/checkout@v4
-        if: steps.check.outputs.exists != 'true'
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "Remote digest: $DIGEST"
 
-      # 5. 设置 docker
+      # =========================
+      # 4. 如果版本一致直接跳过
+      # =========================
+      - name: Decide build
+        id: decide
+        run: |
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      # =========================
+      # 5. clone main（永远构建 main）
+      # =========================
+      - name: Checkout main branch
+        if: steps.decide.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO }}
+          ref: main
+
+      # =========================
+      # 6. setup docker
+      # =========================
       - name: Set up QEMU
-        if: steps.check.outputs.exists != 'true'
+        if: steps.decide.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
-        if: steps.check.outputs.exists != 'true'
+        if: steps.decide.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
-      # 6. 登录 GHCR
+      # =========================
+      # 7. login GHCR
+      # =========================
       - name: Login GHCR
-        if: steps.check.outputs.exists != 'true'
+        if: steps.decide.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 7. git archive 拉源码（关键）
-      - name: Fetch source via git archive
-        if: steps.check.outputs.exists != 'true'
+      # =========================
+      # 8. 自动检测 Dockerfile（避免路径炸）
+      # =========================
+      - name: Find Dockerfile
+        id: df
+        if: steps.decide.outputs.skip != 'true'
         run: |
-          git clone --bare https://github.com/${{ env.REPO }} repo.git
-          cd repo.git
+          FILE=$(find . -name Dockerfile | head -n 1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "Found: $FILE"
 
-          git archive --format=tar ${{ steps.tag.outputs.tag }} | tar -x -C ..
-
-          cd ..
-          rm -rf repo.git
-
-          echo "SOURCE=." >> $GITHUB_ENV
-
-      # 8. 构建并推送
+      # =========================
+      # 9. build + push
+      # =========================
       - name: Build and Push
-        if: steps.check.outputs.exists != 'true'
+        if: steps.decide.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
-          context: ${{ env.SOURCE }}
-          file: ./docker/Dockerfile
+          context: .
+          file: ${{ steps.df.outputs.file }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
