@@ -23,12 +23,18 @@ jobs:
 
     steps:
 
-      # 获取最新 commit hash
+      # 获取默认分支 + 最新 commit
       - name: Get latest commit
         id: commit
         run: |
+          DEFAULT_BRANCH=$(curl -s \
+            https://api.github.com/repos/${{ env.REPO }} \
+            | jq -r '.default_branch')
+
+          echo "Default branch: $DEFAULT_BRANCH"
+
           COMMIT=$(curl -s \
-            https://api.github.com/repos/${{ env.REPO }}/commits/main \
+            https://api.github.com/repos/${{ env.REPO }}/commits/${DEFAULT_BRANCH} \
             | jq -r '.sha')
 
           SHORT_COMMIT=$(echo "$COMMIT" | cut -c1-7)
@@ -38,12 +44,13 @@ jobs:
             exit 1
           fi
 
+          echo "branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "short=$SHORT_COMMIT" >> $GITHUB_OUTPUT
 
           echo "Commit: $COMMIT"
 
-      # 用户名转小写
+      # GitHub 用户名转小写
       - name: Lowercase Username
         id: lower
         run: |
@@ -55,6 +62,8 @@ jobs:
         run: |
           IMAGE="ghcr.io/${{ steps.lower.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.commit.outputs.short }}"
 
+          echo "Checking image: $IMAGE"
+
           if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Image already exists"
@@ -63,13 +72,13 @@ jobs:
             echo "Image not exists"
           fi
 
-      # 拉取 main
-      - name: Checkout Main
+      # 拉取源码
+      - name: Checkout Repository
         if: steps.check.outputs.exists != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.REPO }}
-          ref: main
+          ref: ${{ steps.commit.outputs.branch }}
 
       # QEMU
       - name: Set up QEMU
