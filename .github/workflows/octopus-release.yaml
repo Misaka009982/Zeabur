@@ -103,28 +103,14 @@ jobs:
           echo "Computed release version: ${NEW_VERSION}"
 
       - name: Checkout octopus source
-        env:
-          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
-          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
-          SOURCE_REF: ${{ env.SOURCE_REF }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SOURCE_REPOSITORY_TOKEN}" ]; then
-            echo "SOURCE_REPOSITORY_TOKEN is empty or unavailable"
-            exit 1
-          fi
-
-          TOKEN="$(printf '%s' "${SOURCE_REPOSITORY_TOKEN}" | tr -d '\r\n')"
-          git clone \
-            --branch "${SOURCE_REF}" \
-            --depth 1 \
-            "https://x-access-token:${TOKEN}@github.com/${SOURCE_REPOSITORY}.git" \
-            source
-
-          cd source
-          git fetch --tags --force
-          git log -1 --oneline
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 0
+          path: source
+          ssh-key: ${{ secrets.OCTOPUS_ACTIONS_KEY }}
+          persist-credentials: false
 
       - name: Stamp source with release version
         working-directory: source
