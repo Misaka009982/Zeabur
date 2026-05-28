@@ -1,0 +1,247 @@
+name: octopus private build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_update:
+        description: Version update type
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - patch
+          - minor
+          - major
+      source_ref:
+        description: Private source branch, tag, or commit to build
+        required: true
+        default: master
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: octopus-private-build
+  cancel-in-progress: false
+
+env:
+  OUTPUT_BRANCH: octopus
+  INITIAL_VERSION: v0.9.28.0
+  SOURCE_REPOSITORY: Misaka009982/octopus
+
+jobs:
+  build:
+    name: build private source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout artifact branch workspace
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          path: dist
+          token: ${{ secrets.ACTION_TOKEN }}
+
+      - name: Prepare artifact branch and version
+        id: version
+        working-directory: dist
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${OUTPUT_BRANCH}:refs/remotes/origin/${OUTPUT_BRANCH}" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/${OUTPUT_BRANCH}"; then
+            git checkout -B "${OUTPUT_BRANCH}" "origin/${OUTPUT_BRANCH}"
+          else
+            git checkout --orphan "${OUTPUT_BRANCH}"
+            git rm -rf . || true
+          fi
+
+          CURRENT_VERSION=""
+          if [ -f version ]; then
+            CURRENT_VERSION="$(tr -d '[:space:]' < version)"
+          fi
+          BASE_VERSION="${CURRENT_VERSION:-${INITIAL_VERSION}}"
+
+          VERSION_NUMBER="${BASE_VERSION#v}"
+          IFS='.' read -r MAJOR MINOR PATCH BUILD <<EOF
+          ${VERSION_NUMBER}
+          EOF
+
+          if ! [[ "${MAJOR}" =~ ^[0-9]+$ && "${MINOR}" =~ ^[0-9]+$ && "${PATCH}" =~ ^[0-9]+$ && "${BUILD}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid base version: ${BASE_VERSION}" >&2
+            exit 1
+          fi
+
+          case "${{ inputs.version_update }}" in
+            build)
+              BUILD=$((BUILD + 1))
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              BUILD=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              BUILD=0
+              ;;
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              BUILD=0
+              ;;
+            *)
+              echo "Unsupported version update type: ${{ inputs.version_update }}" >&2
+              exit 1
+              ;;
+          esac
+
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
+          echo "base_version=${BASE_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "current_version=${CURRENT_VERSION:-none}" >> "${GITHUB_OUTPUT}"
+          echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Computed release version: ${NEW_VERSION}"
+
+      - name: Checkout private source
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          path: source
+          token: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
+
+      - name: Stamp source with release version
+        working-directory: source
+        run: |
+          set -euo pipefail
+          git tag -f "${{ steps.version.outputs.version }}"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: pnpm
+          cache-dependency-path: source/web/pnpm-lock.yaml
+
+      - name: Build files
+        working-directory: source
+        run: bash scripts/build.sh release
+
+      - name: Compute lowercase image name
+        id: image
+        run: |
+          OWNER_LOWER=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          REPO_NAME=$(printf '%s' '${{ github.event.repository.name }}')
+          REPO_LOWER=$(printf '%s' "${REPO_NAME}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${OWNER_LOWER}/${REPO_LOWER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Docker meta (Debian)
+        id: meta-debian
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.image.outputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.version }}
+
+      - name: Docker meta (Alpine)
+        id: meta-alpine
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.image.outputs.image }}
+          tags: |
+            type=raw,value=latest-alpine
+            type=raw,value=${{ steps.version.outputs.version }}-alpine
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push (Alpine)
+        uses: docker/build-push-action@v5
+        with:
+          context: source
+          file: source/scripts/dockerfiles/Dockerfile.alpine
+          push: true
+          platforms: linux/amd64,linux/i386,linux/arm64,linux/arm/v7
+          tags: ${{ steps.meta-alpine.outputs.tags }}
+          labels: ${{ steps.meta-alpine.outputs.labels }}
+          build-args: |
+            TARGETPLATFORM
+
+      - name: Build and push (Debian)
+        uses: docker/build-push-action@v5
+        with:
+          context: source
+          file: source/scripts/dockerfiles/Dockerfile.debian
+          push: true
+          platforms: linux/amd64,linux/i386,linux/arm64,linux/arm/v7
+          tags: ${{ steps.meta-debian.outputs.tags }}
+          labels: ${{ steps.meta-debian.outputs.labels }}
+          build-args: |
+            TARGETPLATFORM
+
+      - name: Publish files to octopus branch
+        working-directory: dist
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_DIR="${VERSION}"
+
+          rm -rf "${VERSION_DIR}"
+          mkdir -p "${VERSION_DIR}"
+
+          shopt -s nullglob
+          ARTIFACTS=(../source/build/archives/*)
+          if [ ${#ARTIFACTS[@]} -eq 0 ]; then
+            echo "No files found in source/build/archives" >&2
+            exit 1
+          fi
+
+          cp "${ARTIFACTS[@]}" "${VERSION_DIR}/"
+          if [ -f ../source/build/bin/md5.txt ]; then
+            cp ../source/build/bin/md5.txt "${VERSION_DIR}/md5.txt"
+          fi
+          printf '%s\n' "${VERSION}" > version
+
+          git config user.name 'GitHub Actions'
+          git config user.email 'github-actions@github.com'
+          git add version "${VERSION_DIR}"
+
+          if git diff --cached --quiet; then
+            echo "No artifact changes to publish."
+          else
+            git commit -m "release ${VERSION}"
+            git push origin "${OUTPUT_BRANCH}"
+          fi
+
