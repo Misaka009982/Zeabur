@@ -103,14 +103,34 @@ jobs:
           echo "Computed release version: ${NEW_VERSION}"
 
       - name: Checkout octopus source
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ env.SOURCE_REPOSITORY }}
-          ref: ${{ env.SOURCE_REF }}
-          fetch-depth: 0
-          path: source
-          ssh-key: ${{ secrets.OCTOPUS_ACTIONS_KEY }}
-          persist-credentials: false
+        env:
+          OCTOPUS_ACTIONS_KEY: ${{ secrets.OCTOPUS_ACTIONS_KEY }}
+          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
+          SOURCE_REF: ${{ env.SOURCE_REF }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${OCTOPUS_ACTIONS_KEY}" ]; then
+            echo "OCTOPUS_ACTIONS_KEY is empty or unavailable"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "${OCTOPUS_ACTIONS_KEY}" > ~/.ssh/octopus_actions_key
+          chmod 600 ~/.ssh/octopus_actions_key
+
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/octopus_actions_key -o IdentitiesOnly=yes" \
+            git clone --branch "${SOURCE_REF}" --depth 1 \
+            "git@github.com:${SOURCE_REPOSITORY}.git" \
+            source
+
+          cd source
+          git fetch --tags --force
+          git log -1 --oneline
 
       - name: Stamp source with release version
         working-directory: source
