@@ -35,12 +35,14 @@ jobs:
   build:
     name: build private source
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout artifact branch workspace
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           path: dist
+          token: ${{ github.token }}
 
       - name: Prepare artifact branch and version
         id: version
@@ -103,6 +105,14 @@ jobs:
           echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Computed release version: ${NEW_VERSION}"
 
+      - name: Verify source token exists
+        run: |
+          if [ -z "${{ secrets.SOURCE_REPOSITORY_TOKEN }}" ]; then
+            echo "SOURCE_REPOSITORY_TOKEN is empty or unavailable"
+            echo "Make sure it is added as an Actions repository secret, not a variable."
+            exit 1
+          fi
+
       - name: Checkout private source
         uses: actions/checkout@v5
         with:
@@ -110,7 +120,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
           path: source
-          token: ${{ secrets.SOURCE_REPOSITORY_TOKEN || github.token }}
+          token: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
 
       - name: Stamp source with release version
         working-directory: source
@@ -185,7 +195,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and push (Alpine)
+      - name: Build and push Alpine image
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -197,7 +207,7 @@ jobs:
           build-args: |
             TARGETPLATFORM
 
-      - name: Build and push (Debian)
+      - name: Build and push Debian image
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -243,5 +253,3 @@ jobs:
             git commit -m "release ${VERSION}"
             git push origin "${OUTPUT_BRANCH}"
           fi
-
-
