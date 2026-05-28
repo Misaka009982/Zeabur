@@ -35,11 +35,10 @@ jobs:
 
     steps:
       - name: Checkout artifact branch workspace
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           path: dist
-          token: ${{ github.token }}
+          fetch-depth: 0
 
       - name: Prepare artifact branch and version
         id: version
@@ -102,11 +101,9 @@ jobs:
           echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Computed release version: ${NEW_VERSION}"
 
-      - name: Checkout octopus source
+      - name: Prepare octopus SSH key
         env:
           OCTOPUS_ACTIONS_KEY: ${{ secrets.OCTOPUS_ACTIONS_KEY }}
-          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
-          SOURCE_REF: ${{ env.SOURCE_REF }}
         run: |
           set -euo pipefail
 
@@ -121,7 +118,19 @@ jobs:
           printf '%s\n' "${OCTOPUS_ACTIONS_KEY}" > ~/.ssh/octopus_actions_key
           chmod 600 ~/.ssh/octopus_actions_key
 
+          ssh-keygen -y -f ~/.ssh/octopus_actions_key > ~/.ssh/octopus_actions_key.pub
+
+          echo "Public key fingerprint from Actions secret:"
+          ssh-keygen -lf ~/.ssh/octopus_actions_key.pub
+
           ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Checkout octopus source
+        env:
+          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
+          SOURCE_REF: ${{ env.SOURCE_REF }}
+        run: |
+          set -euo pipefail
 
           GIT_SSH_COMMAND="ssh -i ~/.ssh/octopus_actions_key -o IdentitiesOnly=yes" \
             git clone --branch "${SOURCE_REF}" --depth 1 \
