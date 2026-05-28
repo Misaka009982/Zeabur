@@ -45,10 +45,12 @@ jobs:
           pnpm --filter @misaka009982/inkos-studio build
           pnpm --filter @misaka009982/inkos build
 
-      - name: Pack InkOS CLI
+      - name: Pack InkOS packages
         working-directory: inkos-src
         run: |
           mkdir -p ../packed
+          pnpm --filter @misaka009982/inkos-core pack --pack-destination ../packed
+          pnpm --filter @misaka009982/inkos-studio pack --pack-destination ../packed
           pnpm --filter @misaka009982/inkos pack --pack-destination ../packed
           ls -lh ../packed
 
@@ -68,11 +70,14 @@ jobs:
             git rm -rf . || true
           fi
 
-      - name: Copy package artifact
+      - name: Copy package artifacts
         run: |
           mkdir -p package-repo/packages
-          rm -f package-repo/packages/misaka009982-inkos-*.tgz
+          rm -f package-repo/packages/misaka009982-inkos*.tgz
+          cp packed/misaka009982-inkos-core-*.tgz package-repo/packages/
+          cp packed/misaka009982-inkos-studio-*.tgz package-repo/packages/
           cp packed/misaka009982-inkos-*.tgz package-repo/packages/
+          ls -lh package-repo/packages
 
       - name: Write package info
         working-directory: package-repo
@@ -83,21 +88,30 @@ jobs:
             echo "Generated from private repo: Misaka009982/inkos"
             echo "Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
             echo
-            echo "Package:"
-            ls packages/misaka009982-inkos-*.tgz
+            echo "Packages:"
+            ls packages/misaka009982-inkos*.tgz
+            echo
+            echo "Install:"
+            echo
+            echo '```powershell'
+            echo 'npm install -g \'
+            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-<version>.tgz \'
+            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-<version>.tgz \'
+            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-<version>.tgz'
+            echo '```'
           } > README.md
 
       - name: Commit package
         working-directory: package-repo
         run: |
-          git add README.md packages/misaka009982-inkos-*.tgz
+          git add README.md packages/misaka009982-inkos*.tgz
 
           if git diff --cached --quiet; then
             echo "No package changes."
             exit 0
           fi
 
-          git commit -m "build: update InkOS tgz package"
+          git commit -m "build: update InkOS tgz packages"
 
       - name: Push inkos branch
         working-directory: package-repo
