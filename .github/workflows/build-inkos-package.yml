@@ -16,7 +16,6 @@ jobs:
         with:
           path: package-repo
           fetch-depth: 0
-          token: ${{ secrets.INKOS_PAT }}
 
       - name: Checkout private InkOS repo
         uses: actions/checkout@v4
@@ -25,7 +24,7 @@ jobs:
           ref: master
           path: inkos-src
           fetch-depth: 1
-          token: ${{ secrets.INKOS_PAT }}
+          ssh-key: ${{ secrets.INKOS_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,8 +36,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: inkos-src
-        run: |
-          pnpm install --no-frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build packages
         working-directory: inkos-src
@@ -82,7 +80,6 @@ jobs:
             echo "# InkOS Package"
             echo
             echo "Generated from private repo: Misaka009982/inkos"
-            echo
             echo "Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
             echo
             echo "Package:"
@@ -103,5 +100,4 @@ jobs:
 
       - name: Push inkos branch
         working-directory: package-repo
-        run: |
-          git push origin inkos
+        run: git push origin inkos
