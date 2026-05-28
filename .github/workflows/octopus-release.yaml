@@ -124,6 +124,16 @@ jobs:
           ssh-keygen -lf ~/.ssh/octopus_actions_key.pub
 
           ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Test octopus SSH auth
+        run: |
+          set -euo pipefail
+
+          ssh -i ~/.ssh/octopus_actions_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -T git@github.com || true
 
       - name: Checkout octopus source
         env:
@@ -132,13 +142,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/octopus_actions_key -o IdentitiesOnly=yes" \
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/octopus_actions_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
             git clone --branch "${SOURCE_REF}" --depth 1 \
             "git@github.com:${SOURCE_REPOSITORY}.git" \
             source
 
           cd source
-          git fetch --tags --force
+
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/octopus_actions_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            git fetch --tags --force
+
           git log -1 --oneline
 
       - name: Stamp source with release version
