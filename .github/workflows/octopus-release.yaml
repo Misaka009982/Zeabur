@@ -35,14 +35,12 @@ jobs:
   build:
     name: build private source
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout artifact branch workspace
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           path: dist
-          token: ${{ github.token }}
 
       - name: Prepare artifact branch and version
         id: version
@@ -106,12 +104,36 @@ jobs:
           echo "Computed release version: ${NEW_VERSION}"
 
       - name: Verify source token exists
+        env:
+          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
         run: |
-          if [ -z "${{ secrets.SOURCE_REPOSITORY_TOKEN }}" ]; then
+          if [ -z "${SOURCE_REPOSITORY_TOKEN}" ]; then
             echo "SOURCE_REPOSITORY_TOKEN is empty or unavailable"
-            echo "Make sure it is added as an Actions repository secret, not a variable."
             exit 1
           fi
+          echo "SOURCE_REPOSITORY_TOKEN is available"
+
+      - name: Verify source token can access source repo
+        env:
+          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
+          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+
+          status="$(
+            curl -sS -o /tmp/source-repo.json -w "%{http_code}" \
+              -H "Authorization: Bearer ${SOURCE_REPOSITORY_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${SOURCE_REPOSITORY}"
+          )"
+
+          if [ "${status}" != "200" ]; then
+            echo "SOURCE_REPOSITORY_TOKEN cannot access ${SOURCE_REPOSITORY}, HTTP status: ${status}"
+            cat /tmp/source-repo.json
+            exit 1
+          fi
+
+          echo "SOURCE_REPOSITORY_TOKEN can access ${SOURCE_REPOSITORY}"
 
       - name: Checkout private source
         uses: actions/checkout@v5
@@ -195,7 +217,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and push Alpine image
+      - name: Build and push (Alpine)
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -207,7 +229,7 @@ jobs:
           build-args: |
             TARGETPLATFORM
 
-      - name: Build and push Debian image
+      - name: Build and push (Debian)
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -253,3 +275,5 @@ jobs:
             git commit -m "release ${VERSION}"
             git push origin "${OUTPUT_BRANCH}"
           fi
+
+
