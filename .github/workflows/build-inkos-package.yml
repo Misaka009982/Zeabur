@@ -1,3 +1,4 @@
+````yaml
 name: Build InkOS Package
 
 on:
@@ -49,9 +50,11 @@ jobs:
         working-directory: inkos-src
         run: |
           mkdir -p ../packed
+
           pnpm --filter @misaka009982/inkos-core pack --pack-destination ../packed
           pnpm --filter @misaka009982/inkos-studio pack --pack-destination ../packed
           pnpm --filter @misaka009982/inkos pack --pack-destination ../packed
+
           ls -lh ../packed
 
       - name: Prepare inkos branch
@@ -73,15 +76,22 @@ jobs:
       - name: Copy package artifacts
         run: |
           mkdir -p package-repo/packages
+
           rm -f package-repo/packages/misaka009982-inkos*.tgz
+
           cp packed/misaka009982-inkos-core-*.tgz package-repo/packages/
           cp packed/misaka009982-inkos-studio-*.tgz package-repo/packages/
           cp packed/misaka009982-inkos-*.tgz package-repo/packages/
+
           ls -lh package-repo/packages
 
       - name: Write package info
-        working-directory: package-repo
+        working-directory: inkos-src
         run: |
+          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          STUDIO_VERSION=$(node -p "require('./packages/studio/package.json').version")
+          INKOS_VERSION=$(node -p "require('./packages/inkos/package.json').version")
+
           {
             echo "# InkOS Package"
             echo
@@ -89,17 +99,17 @@ jobs:
             echo "Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
             echo
             echo "Packages:"
-            ls packages/misaka009982-inkos*.tgz
+            ls ../package-repo/packages/misaka009982-inkos*.tgz
             echo
             echo "Install:"
             echo
             echo '```powershell'
             echo 'npm install -g \'
-            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-<version>.tgz \'
-            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-<version>.tgz \'
-            echo '  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-<version>.tgz'
+            echo "  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-${CORE_VERSION}.tgz \\"
+            echo "  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-${STUDIO_VERSION}.tgz \\"
+            echo "  https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-${INKOS_VERSION}.tgz"
             echo '```'
-          } > README.md
+          } > ../package-repo/README.md
 
       - name: Commit package
         working-directory: package-repo
@@ -116,3 +126,4 @@ jobs:
       - name: Push inkos branch
         working-directory: package-repo
         run: git push origin inkos
+````
