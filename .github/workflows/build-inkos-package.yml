@@ -1,0 +1,107 @@
+name: Build InkOS Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-inkos-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout package repo
+        uses: actions/checkout@v4
+        with:
+          path: package-repo
+          fetch-depth: 0
+          token: ${{ secrets.INKOS_PAT }}
+
+      - name: Checkout private InkOS repo
+        uses: actions/checkout@v4
+        with:
+          repository: Misaka009982/inkos
+          ref: master
+          path: inkos-src
+          fetch-depth: 1
+          token: ${{ secrets.INKOS_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: inkos-src
+        run: |
+          pnpm install --no-frozen-lockfile
+
+      - name: Build packages
+        working-directory: inkos-src
+        run: |
+          pnpm --filter @actalk/inkos-core build
+          pnpm --filter @actalk/inkos build
+
+      - name: Pack InkOS CLI
+        working-directory: inkos-src
+        run: |
+          mkdir -p ../packed
+          pnpm --filter @actalk/inkos pack --pack-destination ../packed
+          ls -lh ../packed
+
+      - name: Prepare inkos branch
+        working-directory: package-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin inkos || true
+
+          if git show-ref --verify --quiet refs/remotes/origin/inkos; then
+            git checkout inkos
+            git pull origin inkos
+          else
+            git checkout --orphan inkos
+            git rm -rf . || true
+          fi
+
+      - name: Copy package artifact
+        run: |
+          mkdir -p package-repo/packages
+          rm -f package-repo/packages/actalk-inkos-*.tgz
+          cp packed/actalk-inkos-*.tgz package-repo/packages/
+
+      - name: Write package info
+        working-directory: package-repo
+        run: |
+          {
+            echo "# InkOS Package"
+            echo
+            echo "Generated from private repo: Misaka009982/inkos"
+            echo
+            echo "Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            echo
+            echo "Package:"
+            ls packages/actalk-inkos-*.tgz
+          } > README.md
+
+      - name: Commit package
+        working-directory: package-repo
+        run: |
+          git add README.md packages/actalk-inkos-*.tgz
+
+          if git diff --cached --quiet; then
+            echo "No package changes."
+            exit 0
+          fi
+
+          git commit -m "build: update InkOS tgz package"
+
+      - name: Push inkos branch
+        working-directory: package-repo
+        run: |
+          git push origin inkos
