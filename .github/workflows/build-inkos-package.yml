@@ -41,14 +41,15 @@ jobs:
       - name: Build packages
         working-directory: inkos-src
         run: |
-          pnpm --filter @actalk/inkos-core build
-          pnpm --filter @actalk/inkos build
+          pnpm --filter @misaka009982/inkos-core build
+          pnpm --filter @misaka009982/inkos-studio build
+          pnpm --filter @misaka009982/inkos build
 
       - name: Pack InkOS CLI
         working-directory: inkos-src
         run: |
           mkdir -p ../packed
-          pnpm --filter @actalk/inkos pack --pack-destination ../packed
+          pnpm --filter @misaka009982/inkos pack --pack-destination ../packed
           ls -lh ../packed
 
       - name: Prepare inkos branch
@@ -70,8 +71,8 @@ jobs:
       - name: Copy package artifact
         run: |
           mkdir -p package-repo/packages
-          rm -f package-repo/packages/actalk-inkos-*.tgz
-          cp packed/actalk-inkos-*.tgz package-repo/packages/
+          rm -f package-repo/packages/misaka009982-inkos-*.tgz
+          cp packed/misaka009982-inkos-*.tgz package-repo/packages/
 
       - name: Write package info
         working-directory: package-repo
@@ -83,13 +84,13 @@ jobs:
             echo "Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
             echo
             echo "Package:"
-            ls packages/actalk-inkos-*.tgz
+            ls packages/misaka009982-inkos-*.tgz
           } > README.md
 
       - name: Commit package
         working-directory: package-repo
         run: |
-          git add README.md packages/actalk-inkos-*.tgz
+          git add README.md packages/misaka009982-inkos-*.tgz
 
           if git diff --cached --quiet; then
             echo "No package changes."
