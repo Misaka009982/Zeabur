@@ -189,10 +189,11 @@ jobs:
       - name: Compute lowercase image name
         id: image
         run: |
+          set -euo pipefail
+
           OWNER_LOWER=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-          REPO_NAME=$(printf '%s' '${{ github.event.repository.name }}')
-          REPO_LOWER=$(printf '%s' "${REPO_NAME}" | tr '[:upper:]' '[:lower:]')
-          echo "image=ghcr.io/${OWNER_LOWER}/${REPO_LOWER}" >> "${GITHUB_OUTPUT}"
+          IMAGE_LOWER=$(printf '%s' 'octopus' | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${OWNER_LOWER}/${IMAGE_LOWER}" >> "${GITHUB_OUTPUT}"
 
       - name: Docker meta Debian
         id: meta-debian
