@@ -13,10 +13,6 @@ on:
           - patch
           - minor
           - major
-      source_ref:
-        description: Private source branch, tag, or commit to build
-        required: true
-        default: master
 
 permissions:
   contents: write
@@ -30,17 +26,20 @@ env:
   OUTPUT_BRANCH: octopus
   INITIAL_VERSION: v0.9.28.0
   SOURCE_REPOSITORY: Misaka009982/octopus
+  SOURCE_REF: master
 
 jobs:
   build:
-    name: build private source
+    name: build octopus source
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout artifact branch workspace
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           path: dist
+          token: ${{ github.token }}
 
       - name: Prepare artifact branch and version
         id: version
@@ -103,36 +102,11 @@ jobs:
           echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Computed release version: ${NEW_VERSION}"
 
-      - name: Verify source token exists
-        env:
-          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
-        run: |
-          if [ -z "${SOURCE_REPOSITORY_TOKEN}" ]; then
-            echo "SOURCE_REPOSITORY_TOKEN is empty or unavailable"
-            exit 1
-          fi
-          echo "SOURCE_REPOSITORY_TOKEN is available"
-
-      - name: Verify source token can access source repo
-        env:
-          SOURCE_REPOSITORY_TOKEN: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
-          SOURCE_REPOSITORY: ${{ env.SOURCE_REPOSITORY }}
-        run: |
-          set -euo pipefail
-
-          TOKEN="$(printf '%s' "${SOURCE_REPOSITORY_TOKEN}" | tr -d '\r\n')"
-          AUTH="$(printf 'x-access-token:%s' "${TOKEN}" | base64 -w0)"
-
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH}" \
-            ls-remote "https://github.com/${SOURCE_REPOSITORY}.git" HEAD >/dev/null
-
-          echo "SOURCE_REPOSITORY_TOKEN can access ${SOURCE_REPOSITORY}"
-
-      - name: Checkout private source
+      - name: Checkout octopus source
         uses: actions/checkout@v5
         with:
           repository: ${{ env.SOURCE_REPOSITORY }}
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ env.SOURCE_REF }}
           fetch-depth: 0
           path: source
           token: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
@@ -177,7 +151,7 @@ jobs:
           REPO_LOWER=$(printf '%s' "${REPO_NAME}" | tr '[:upper:]' '[:lower:]')
           echo "image=ghcr.io/${OWNER_LOWER}/${REPO_LOWER}" >> "${GITHUB_OUTPUT}"
 
-      - name: Docker meta (Debian)
+      - name: Docker meta Debian
         id: meta-debian
         uses: docker/metadata-action@v5
         with:
@@ -187,7 +161,7 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ steps.version.outputs.version }}
 
-      - name: Docker meta (Alpine)
+      - name: Docker meta Alpine
         id: meta-alpine
         uses: docker/metadata-action@v5
         with:
@@ -210,7 +184,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and push (Alpine)
+      - name: Build and push Alpine image
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -222,7 +196,7 @@ jobs:
           build-args: |
             TARGETPLATFORM
 
-      - name: Build and push (Debian)
+      - name: Build and push Debian image
         uses: docker/build-push-action@v5
         with:
           context: source
@@ -268,5 +242,3 @@ jobs:
             git commit -m "release ${VERSION}"
             git push origin "${OUTPUT_BRANCH}"
           fi
-
-
