@@ -110,7 +110,7 @@ jobs:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
           path: source
-          token: ${{ secrets.SOURCE_REPOSITORY_TOKEN }}
+          token: ${{ secrets.SOURCE_REPOSITORY_TOKEN || github.token }}
 
       - name: Stamp source with release version
         working-directory: source
