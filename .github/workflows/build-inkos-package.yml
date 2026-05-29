@@ -91,6 +91,10 @@ jobs:
           STUDIO_VERSION=$(node -p "require('./packages/studio/package.json').version")
           INKOS_VERSION=$(node -p "require('./packages/cli/package.json').version")
 
+          CORE_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-${CORE_VERSION}.tgz"
+          STUDIO_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-${STUDIO_VERSION}.tgz"
+          INKOS_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-${INKOS_VERSION}.tgz"
+
           {
             echo "# InkOS Package"
             echo
@@ -100,10 +104,26 @@ jobs:
             echo "Packages:"
             ls ../package-repo/packages/misaka009982-inkos*.tgz
             echo
-            echo "Install:"
+            echo "## 按需安装"
+            echo
+            echo "默认只安装 InkOS Core 和 InkOS CLI。Studio 已改为需要时再安装。"
             echo
             echo '```powershell'
-            echo "npm install -g https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-${CORE_VERSION}.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-${STUDIO_VERSION}.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-${INKOS_VERSION}.tgz"
+            echo "npm install -g $CORE_URL $INKOS_URL"
+            echo '```'
+            echo
+            echo "需要 Studio 时单独安装："
+            echo
+            echo '```powershell'
+            echo "npm install -g $STUDIO_URL"
+            echo '```'
+            echo
+            echo "## 全量安装"
+            echo
+            echo "一次性安装 Core、Studio 和 CLI："
+            echo
+            echo '```powershell'
+            echo "npm install -g $CORE_URL $STUDIO_URL $INKOS_URL"
             echo '```'
           } > ../package-repo/README.md
 
