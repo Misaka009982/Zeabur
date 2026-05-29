@@ -1,15 +1,31 @@
 # InkOS Package
 
 Generated from private repo: Misaka009982/inkos
-Built at: 2026-05-28T17:23:59Z
+Built at: 2026-05-29T17:45:08Z
 
 Packages:
-../package-repo/packages/misaka009982-inkos-1.4.1-1.tgz
-../package-repo/packages/misaka009982-inkos-core-1.4.1-1.tgz
-../package-repo/packages/misaka009982-inkos-studio-1.4.1-1.tgz
+../package-repo/packages/misaka009982-inkos-1.4.1-2.tgz
+../package-repo/packages/misaka009982-inkos-core-1.4.1-2.tgz
+../package-repo/packages/misaka009982-inkos-studio-1.4.1-2.tgz
 
-Install:
+## 按需安装
+
+默认只安装 InkOS Core 和 InkOS CLI。Studio 已改为需要时再安装。
 
 ```powershell
-npm install -g https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-1.4.1-1.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-1.4.1-1.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-1.4.1-1.tgz
+npm install -g https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-1.4.1-2.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-1.4.1-2.tgz
+```
+
+需要 Studio 时单独安装：
+
+```powershell
+npm install -g https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-1.4.1-2.tgz
+```
+
+## 全量安装
+
+一次性安装 Core、Studio 和 CLI：
+
+```powershell
+npm install -g https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-1.4.1-2.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-1.4.1-2.tgz https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-1.4.1-2.tgz
 ```
