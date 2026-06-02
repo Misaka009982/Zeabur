@@ -49,14 +49,6 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Test SSH auth
-        run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/qwen2api_key \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -T git@github.com || true
-
       - name: Checkout private source
         run: |
           set -euo pipefail
@@ -73,19 +65,8 @@ jobs:
         id: image
         run: |
           OWNER_LOWER="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          IMAGE_LOWER="$(printf '%s' 'qwen2api' | tr '[:upper:]' '[:lower:]')"
+          IMAGE_LOWER="$(printf '%s' '${IMAGE_NAME}' | tr '[:upper:]' '[:lower:]')"
           echo "image=ghcr.io/${OWNER_LOWER}/${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: source
-          file: source/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ steps.image.outputs.image }}:latest
-            ${{ steps.image.outputs.image }}:${{ github.sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -110,5 +91,5 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/misaka009982/qwen2api:latest
-            ghcr.io/misaka009982/qwen2api:${{ github.sha }}
+            ${{ steps.image.outputs.image }}:${{ inputs.image_tag }}
+            ${{ steps.image.outputs.image }}:${{ github.sha }}
