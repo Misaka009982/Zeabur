@@ -1,4 +1,4 @@
-name: octopus private build
+name: Octopus
 
 on:
   workflow_dispatch:
