@@ -73,7 +73,7 @@ jobs:
         id: image
         run: |
           OWNER_LOWER="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          IMAGE_LOWER="$(printf '%s' '${IMAGE_NAME}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE_LOWER="$(printf '%s' 'qwen2api' | tr '[:upper:]' '[:lower:]')"
           echo "image=ghcr.io/${OWNER_LOWER}/${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
