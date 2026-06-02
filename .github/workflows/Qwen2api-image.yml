@@ -1,0 +1,112 @@
+name: qwen2API Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch/tag/commit
+        required: true
+        default: main
+      image_tag:
+        description: Image tag
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: qwen2api-image-build
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: Misaka009982/qwen2API
+  IMAGE_NAME: qwen2api
+
+jobs:
+  build:
+    name: Build and push qwen2API image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare SSH key
+        env:
+          QWEN2API_SSH_KEY: ${{ secrets.QWEN2API_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${QWEN2API_SSH_KEY}" ]; then
+            echo "QWEN2API_SSH_KEY is empty or unavailable" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${QWEN2API_SSH_KEY}" > ~/.ssh/qwen2api_key
+          chmod 600 ~/.ssh/qwen2api_key
+
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Test SSH auth
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/qwen2api_key \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -T git@github.com || true
+
+      - name: Checkout private source
+        run: |
+          set -euo pipefail
+
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/qwen2api_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            git clone --branch "${{ inputs.source_ref }}" --depth 1 \
+            "git@github.com:${SOURCE_REPOSITORY}.git" \
+            source
+
+          cd source
+          git log -1 --oneline
+
+      - name: Compute lowercase image name
+        id: image
+        run: |
+          set -euo pipefail
+
+          OWNER_LOWER="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE_LOWER="$(printf '%s' '${IMAGE_NAME}' | tr '[:upper:]' '[:lower:]')"
+
+          echo "image=ghcr.io/${OWNER_LOWER}/${IMAGE_LOWER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.image }}
+          tags: |
+            type=raw,value=${{ inputs.image_tag }}
+            type=sha,prefix=sha-
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: source
+          file: source/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
