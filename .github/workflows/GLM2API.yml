@@ -1,0 +1,163 @@
+name: GLM2API Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch/tag/commit
+        required: true
+        default: main
+      version_type:
+        description: Version bump type
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: glm2api-image-build
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPOSITORY: Misaka009982/glm2api
+  IMAGE_NAME: glm2api
+  IMAGE: ghcr.io/misaka009982/glm2api
+  PACKAGE_OWNER: misaka009982
+  BASE_VERSION: 0.1.71
+
+jobs:
+  build:
+    name: Build and push GLM2API image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare SSH key
+        env:
+          GLM2API_SSH_KEY: ${{ secrets.GLM2API_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GLM2API_SSH_KEY}" ]; then
+            echo "GLM2API_SSH_KEY is empty or unavailable" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${GLM2API_SSH_KEY}" > ~/.ssh/glm2api_key
+          chmod 600 ~/.ssh/glm2api_key
+
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Checkout private source
+        run: |
+          set -euo pipefail
+
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/glm2api_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            git clone --branch "${{ inputs.source_ref }}" --depth 1 \
+            "git@github.com:${SOURCE_REPOSITORY}.git" \
+            source
+
+          cd source
+          git log -1 --oneline
+
+      - name: Calculate next version from GHCR
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_OWNER: ${{ env.PACKAGE_OWNER }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          VERSION_TYPE: ${{ inputs.version_type }}
+          BASE_VERSION: ${{ env.BASE_VERSION }}
+        run: |
+          set -euo pipefail
+
+          TAGS="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/users/${PACKAGE_OWNER}/packages/container/${IMAGE_NAME}/versions?per_page=100" \
+              --jq '.[].metadata.container.tags[]?' 2>/dev/null || true
+          )"
+
+          LATEST_VERSION="$(
+            printf '%s\n' "${TAGS}" \
+              | sed -E 's/^v//' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n 1 || true
+          )"
+
+          if [ -z "${LATEST_VERSION}" ]; then
+            NEW_VERSION="${BASE_VERSION}"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<EOF
+          ${LATEST_VERSION}
+          EOF
+
+            case "${VERSION_TYPE}" in
+              major)
+                NEW_VERSION="$((MAJOR + 1)).0.0"
+                ;;
+              minor)
+                NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+                ;;
+              *)
+                NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+                ;;
+            esac
+          fi
+
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          echo "latest_version=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "new_tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+
+          echo "Latest GHCR version: ${LATEST_VERSION:-none}"
+          echo "Next version: ${NEW_VERSION}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: source
+          file: source/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.new_version }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.new_tag }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ env.SOURCE_REPOSITORY }}
+            org.opencontainers.image.version=${{ steps.version.outputs.new_version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            BUILD_VERSION=${{ steps.version.outputs.new_tag }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
