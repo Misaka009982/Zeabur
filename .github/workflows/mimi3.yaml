@@ -2,8 +2,8 @@ name: Build MiMi3
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '11 23 * * *'
+  #schedule:
+  #  - cron: '11 23 * * *'
 
 concurrency:
   group: mimi3-build
@@ -12,6 +12,7 @@ concurrency:
 env:
   REPO: wkeqin/mimi3
   IMAGE_NAME: mimi3
+  BRANCH: main
 
 jobs:
   build:
@@ -23,18 +24,12 @@ jobs:
 
     steps:
 
-      # 获取默认分支 + 最新 commit
+      # 获取 main 分支最新 commit
       - name: Get latest commit
         id: commit
         run: |
-          DEFAULT_BRANCH=$(curl -s \
-            https://api.github.com/repos/${{ env.REPO }} \
-            | jq -r '.default_branch')
-
-          echo "Default branch: $DEFAULT_BRANCH"
-
           COMMIT=$(curl -s \
-            https://api.github.com/repos/${{ env.REPO }}/commits/${DEFAULT_BRANCH} \
+            https://api.github.com/repos/${{ env.REPO }}/commits/${{ env.BRANCH }} \
             | jq -r '.sha')
 
           SHORT_COMMIT=$(echo "$COMMIT" | cut -c1-7)
@@ -44,7 +39,6 @@ jobs:
             exit 1
           fi
 
-          echo "branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "short=$SHORT_COMMIT" >> $GITHUB_OUTPUT
 
@@ -72,13 +66,13 @@ jobs:
             echo "Image not exists"
           fi
 
-      # 拉取源码
+      # 拉取源码（固定 main 分支）
       - name: Checkout Repository
         if: steps.check.outputs.exists != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.REPO }}
-          ref: ${{ steps.commit.outputs.branch }}
+          ref: ${{ env.BRANCH }}
 
       # QEMU
       - name: Set up QEMU
