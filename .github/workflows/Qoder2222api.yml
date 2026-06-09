@@ -1,0 +1,127 @@
+name: Build Qoder2222api Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source repository branch, tag, or commit to build
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SOURCE_REPOSITORY: Ttungx/qoder2222api
+
+jobs:
+  docker:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 0
+
+      - name: Read source metadata
+        id: source_meta
+        shell: bash
+        working-directory: source
+        run: |
+          SOURCE_VERSION="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(data["project"]["version"])
+          PY
+          )"
+          SOURCE_VERSION="${SOURCE_VERSION#v}"
+          SOURCE_VERSION_TAG="$(printf '%s' "$SOURCE_VERSION" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//')"
+          if [ -z "$SOURCE_VERSION_TAG" ]; then
+            echo "::error::Failed to read project.version from source/pyproject.toml"
+            exit 1
+          fi
+          SOURCE_SHA="$(git rev-parse --short=12 HEAD)"
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}"
+
+          echo "version=${SOURCE_VERSION_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SOURCE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Write Dockerfile
+        shell: bash
+        working-directory: source
+        run: |
+          cat > Dockerfile <<'EOF'
+          FROM python:3.11-slim AS runtime
+
+          ENV PYTHONDONTWRITEBYTECODE=1 \
+              PYTHONUNBUFFERED=1 \
+              PIP_NO_CACHE_DIR=1 \
+              QODER_PROXY_HOST=0.0.0.0 \
+              QODER_PROXY_PORT=8963
+
+          WORKDIR /app
+
+          RUN groupadd --system app \
+              && useradd --system --gid app --create-home --home-dir /home/app app
+
+          COPY pyproject.toml README.md ./
+          COPY qoder_proxy ./qoder_proxy
+
+          RUN python -m pip install --upgrade pip \
+              && python -m pip install .
+
+          RUN mkdir -p /app/data \
+              && chown -R app:app /app /home/app
+
+          USER app
+
+          EXPOSE 8963
+          VOLUME ["/app/data"]
+
+          HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+              CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8963/health', timeout=3).read()"
+
+          CMD ["qoder-proxy", "serve", "--host", "0.0.0.0", "--port", "8963"]
+          EOF
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.source_meta.outputs.image_name }}
+          tags: |
+            type=raw,value=${{ steps.source_meta.outputs.version }}
+            type=raw,value=v${{ steps.source_meta.outputs.version }}
+            type=raw,value=source-${{ steps.source_meta.outputs.sha }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./source
+          file: ./source/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
