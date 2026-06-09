@@ -49,8 +49,10 @@ jobs:
             exit 1
           fi
           SOURCE_SHA="$(git rev-parse --short=12 HEAD)"
-          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}"
-
+          SOURCE_NAME="${SOURCE_REPOSITORY##*/}"
+          IMAGE_REPOSITORY="$(printf '%s' "$SOURCE_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//')"
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_REPOSITORY}"
+          
           echo "version=${SOURCE_VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "sha=${SOURCE_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
