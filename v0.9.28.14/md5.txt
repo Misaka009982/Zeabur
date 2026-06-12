@@ -1,0 +1,8 @@
+56e0dad1d059eaab6bf0169ac934bd62  ./octopus-darwin-arm64
+8ca4cc3c93382daaf7c6df901b7d5275  ./octopus-linux-x86_64
+e87a78e3f36eb872be320a2de84e4350  ./octopus-windows-x86
+ffcf28a7f4b8f6dc95d6d5b81be42461  ./octopus-linux-x86
+debe847049a461671d690c37d3b64485  ./octopus-darwin-x86_64
+ec44ca633ea6e3634a45470ce40c69bc  ./octopus-linux-armv7
+582790cadb6bf1243453bc0d8d3f3f1d  ./octopus-windows-x86_64
+bee774f6018e1a6d8c1ec815fe15f487  ./octopus-linux-arm64
