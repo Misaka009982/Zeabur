@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Misaka009982/inkos
-          ref: master
+          ref: main
           path: inkos-src
           fetch-depth: 1
           ssh-key: ${{ secrets.INKOS_PAT }}
@@ -41,17 +41,13 @@ jobs:
       - name: Build packages
         working-directory: inkos-src
         run: |
-          pnpm --filter @misaka009982/inkos-core build
-          pnpm --filter @misaka009982/inkos-studio build
           pnpm --filter @misaka009982/inkos build
 
       - name: Pack InkOS packages
         working-directory: inkos-src
         run: |
           mkdir -p ../packed
-
-          pnpm --filter @misaka009982/inkos-core pack --pack-destination ../packed
-          pnpm --filter @misaka009982/inkos-studio pack --pack-destination ../packed
+          
           pnpm --filter @misaka009982/inkos pack --pack-destination ../packed
 
           ls -lh ../packed
@@ -78,8 +74,6 @@ jobs:
 
           rm -f package-repo/packages/misaka009982-inkos*.tgz
 
-          cp packed/misaka009982-inkos-core-*.tgz package-repo/packages/
-          cp packed/misaka009982-inkos-studio-*.tgz package-repo/packages/
           cp packed/misaka009982-inkos-*.tgz package-repo/packages/
 
           ls -lh package-repo/packages
@@ -87,12 +81,9 @@ jobs:
       - name: Write package info
         working-directory: inkos-src
         run: |
-          CORE_VERSION=$(node -p "require('./packages/core/package.json').version")
-          STUDIO_VERSION=$(node -p "require('./packages/studio/package.json').version")
+
           INKOS_VERSION=$(node -p "require('./packages/cli/package.json').version")
 
-          CORE_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-core-${CORE_VERSION}.tgz"
-          STUDIO_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-studio-${STUDIO_VERSION}.tgz"
           INKOS_URL="https://github.com/Misaka009982/Zeabur/raw/refs/heads/inkos/packages/misaka009982-inkos-${INKOS_VERSION}.tgz"
 
           {
@@ -106,25 +97,12 @@ jobs:
             echo
             echo "## 按需安装"
             echo
-            echo "默认只安装 InkOS Core 和 InkOS CLI。Studio 已改为需要时再安装。"
+            echo "默认只安装InkOS CLI。"
             echo
             echo '```powershell'
-            echo "npm install -g $CORE_URL $INKOS_URL"
+            echo "npm install -g $INKOS_URL"
             echo '```'
-            echo
-            echo "需要 Studio 时单独安装："
-            echo
-            echo '```powershell'
-            echo "npm install -g $STUDIO_URL"
-            echo '```'
-            echo
-            echo "## 全量安装"
-            echo
-            echo "一次性安装 Core、Studio 和 CLI："
-            echo
-            echo '```powershell'
-            echo "npm install -g $CORE_URL $STUDIO_URL $INKOS_URL"
-            echo '```'
+
           } > ../package-repo/README.md
 
       - name: Commit package
