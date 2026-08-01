@@ -3,11 +3,15 @@ name: Build qoderwork2api
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: qoderwork2api
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -16,17 +20,24 @@ jobs:
     steps:
       - name: Clone upstream
         run: |
-          git clone https://github.com/Sliverkiss/qoderwork2api.git source
+          git clone --depth=1 https://github.com/Sliverkiss/qoderwork2api.git source
 
-      - name: Lowercase image owner
-        id: owner
+      - name: Get image info
+        id: vars
         run: |
-          echo "name=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          SHA=$(git -C source rev-parse --short HEAD)
 
-      - name: Get commit SHA
-        id: sha
+          echo "owner=$OWNER" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Prepare config.json
         run: |
-          echo "short=$(git -C source rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          cd source
+
+          if [ ! -f config.json ] && [ -f config.example.json ]; then
+            cp config.example.json config.json
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -41,7 +52,20 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check image exists
+        id: check
+        run: |
+          IMAGE="ghcr.io/${{ steps.vars.outputs.owner }}/qoderwork2api:sha-${{ steps.vars.outputs.sha }}"
+
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image already exists, skip."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and Push
+        if: steps.check.outputs.exists == 'false'
         uses: docker/build-push-action@v6
         with:
           context: ./source
@@ -52,5 +76,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/${{ steps.owner.outputs.name }}/qoderwork2api:latest
-            ghcr.io/${{ steps.owner.outputs.name }}/qoderwork2api:sha-${{ steps.sha.outputs.short }}
+            ghcr.io/${{ steps.vars.outputs.owner }}/qoderwork2api:latest
+            ghcr.io/${{ steps.vars.outputs.owner }}/qoderwork2api:sha-${{ steps.vars.outputs.sha }}
