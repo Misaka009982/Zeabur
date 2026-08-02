@@ -21,177 +21,83 @@ jobs:
         id: rel
         run: |
           set -euo pipefail
-
           API="https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
           JSON="$(curl -fsSL "$API")"
-
           TAG="$(echo "$JSON" | jq -r '.tag_name')"
 
-          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-            echo "Failed to get release tag"
-            exit 1
-          fi
+          URL_AMD64="$(echo "$JSON" | jq -r '.assets[]|select((.name|test("linux_amd64\\.tar\\.gz$")) and (.name|contains("no-plugin")|not))|.browser_download_url'|head -n1)"
+          URL_ARM64="$(echo "$JSON" | jq -r '.assets[]|select((.name|test("linux_(arm64|aarch64)\\.tar\\.gz$")) and (.name|contains("no-plugin")|not))|.browser_download_url'|head -n1)"
 
-          echo "===== Release Assets ====="
-          echo "$JSON" | jq -r '.assets[].name'
-
-          URL_AMD64="$(echo "$JSON" | jq -r '
-            .assets[]
-            | select(
-                (.name | test("linux_amd64\\.tar\\.gz$"))
-                and
-                (.name | contains("no-plugin") | not)
-              )
-            | .browser_download_url
-          ' | head -n1)"
-
-          URL_ARM64="$(echo "$JSON" | jq -r '
-            .assets[]
-            | select(
-                (.name | test("linux_(arm64|aarch64)\\.tar\\.gz$"))
-                and
-                (.name | contains("no-plugin") | not)
-              )
-            | .browser_download_url
-          ' | head -n1)"
-
-          echo "AMD64 URL=$URL_AMD64"
-          echo "ARM64 URL=$URL_ARM64"
-
-          if [ -z "$URL_AMD64" ] || [ "$URL_AMD64" = "null" ]; then
-            echo "Missing AMD64 asset"
-            exit 1
-          fi
-
-          if [ -z "$URL_ARM64" ] || [ "$URL_ARM64" = "null" ]; then
-            echo "Missing ARM64 asset"
-            exit 1
-          fi
+          test -n "$URL_AMD64"
+          test -n "$URL_ARM64"
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "url_amd64=$URL_AMD64" >> "$GITHUB_OUTPUT"
           echo "url_arm64=$URL_ARM64" >> "$GITHUB_OUTPUT"
 
-          echo "Latest TAG=$TAG"
-
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      - name: Skip if this release tag already exists
-        id: skip
+      - id: skip
         run: |
-          set -euo pipefail
-
           TAG="${{ steps.rel.outputs.tag }}"
           IMAGE="ghcr.io/${OWNER_LC}/cpa:${TAG}"
-
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - if: steps.skip.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - if: steps.skip.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
 
       - name: Generate Dockerfile
         if: steps.skip.outputs.skip != 'true'
         run: |
           mkdir -p ctx
-
           cat > ctx/Dockerfile <<'EOF'
           FROM debian:bookworm-slim
-
           ARG URL_AMD64
           ARG URL_ARM64
           ARG TARGETARCH
           ARG WORKBUDDY_VERSION=0.8.5
-
-          RUN apt-get update && apt-get install -y --no-install-recommends \
-              ca-certificates \
-              curl \
-              unzip \
-              tar \
-              bash \
-              findutils \
-              tzdata \
-              && rm -rf /var/lib/apt/lists/*
-
+          RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip tar bash findutils tzdata && rm -rf /var/lib/apt/lists/*
           SHELL ["/bin/bash","-lc"]
-
           ENV TZ=Asia/Shanghai
-
-          RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
-           && echo $TZ >/etc/timezone
-
-          RUN set -euxo pipefail; \
-              mkdir -p /CPA; \
-              \
-              case "$TARGETARCH" in \
-                amd64) \
-                  APP_URL="$URL_AMD64"; \
-                  PLUGIN_URL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_amd64.zip"; \
-                  PLUGIN_DIR="/CPA/plugins/linux/amd64"; \
-                  ;; \
-                arm64) \
-                  APP_URL="$URL_ARM64"; \
-                  PLUGIN_URL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_arm64.zip"; \
-                  PLUGIN_DIR="/CPA/plugins/linux/arm64"; \
-                  ;; \
-                *) \
-                  exit 1; \
-                  ;; \
-              esac; \
-              \
-              mkdir -p /tmp/app "$PLUGIN_DIR"; \
-              \
-              curl -fsSL "$APP_URL" -o /tmp/app/app.tar.gz; \
-              tar -xzf /tmp/app/app.tar.gz -C /tmp/app; \
-              \
-              APP_BIN="$(find /tmp/app -type f -name 'cli-proxy-api' | head -n1)"; \
-              test -n "$APP_BIN"; \
-              install -m755 "$APP_BIN" /CPA/CPA; \
-              \
-              if [ -f /tmp/app/config.example.yaml ]; then \
-                  install -m644 /tmp/app/config.example.yaml /CPA/config.example.yaml; \
-              fi; \
-              \
-              curl -fsSL "$PLUGIN_URL" -o /tmp/plugin.zip; \
-              unzip -j /tmp/plugin.zip '*.so' -d "$PLUGIN_DIR"; \
-              chmod 755 "$PLUGIN_DIR"/*.so; \
-              \
-              rm -rf /tmp/app /tmp/plugin.zip; \
-              chown -R 1000:1000 /CPA
-
+          RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
+          RUN set -eux; \
+            case "$TARGETARCH" in \
+              amd64) APP_URL="$URL_AMD64"; PURL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_amd64.zip"; PDIR=/CPA/plugins/linux/amd64;; \
+              arm64) APP_URL="$URL_ARM64"; PURL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_arm64.zip"; PDIR=/CPA/plugins/linux/arm64;; \
+            esac; \
+            mkdir -p /CPA "$PDIR" /tmp/app; \
+            curl -fsSL "$APP_URL" -o /tmp/app/app.tar.gz; \
+            tar -xzf /tmp/app/app.tar.gz -C /tmp/app; \
+            install -m755 "$(find /tmp/app -type f -name cli-proxy-api|head -n1)" /CPA/CPA; \
+            [ -f /tmp/app/config.example.yaml ] && install -m644 /tmp/app/config.example.yaml /CPA/config.example.yaml || true; \
+            curl -fsSL "$PURL" -o /tmp/plugin.zip; \
+            unzip -j /tmp/plugin.zip '*.so' -d "$PDIR"; \
+            chmod 755 "$PDIR"/*.so; \
+            chown -R 1000:1000 /CPA
           WORKDIR /CPA
-
           EXPOSE 7860
-
           USER 1000:1000
-
           CMD ["./CPA"]
           EOF
 
-
-      - name: Build & push multi-arch
+      - name: Build & push
         if: steps.skip.outputs.skip != 'true'
         run: |
-          TAG="${{ steps.rel.outputs.tag }}"
-
-          URL_AMD64="${{ steps.rel.outputs.url_amd64 }}"
-          URL_ARM64="${{ steps.rel.outputs.url_arm64 }}"
-
-          IMAGE="ghcr.io/${OWNER_LC}/cpa"
-
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            --build-arg URL_AMD64="$URL_AMD64" \
-            --build-arg URL_ARM64="$URL_ARM64" \
-            -t "${IMAGE}:${TAG}" \
-            -t "${IMAGE}:latest" \
-            --push \
-            ctx
+            --build-arg URL_AMD64="${{ steps.rel.outputs.url_amd64 }}" \
+            --build-arg URL_ARM64="${{ steps.rel.outputs.url_arm64 }}" \
+            -t ghcr.io/${OWNER_LC}/cpa:${{ steps.rel.outputs.tag }} \
+            -t ghcr.io/${OWNER_LC}/cpa:latest \
+            --push ctx
