@@ -21,23 +21,59 @@ jobs:
         id: rel
         run: |
           set -euo pipefail
+
           API="https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
           JSON="$(curl -fsSL "$API")"
 
           TAG="$(echo "$JSON" | jq -r '.tag_name')"
-          [ -n "$TAG" ] && [ "$TAG" != "null" ]
 
-          URL_AMD64="$(echo "$JSON" | jq -r '.assets[] | select(.name | test("linux_amd64\\.tar\\.gz$")) | .browser_download_url' | head -n1)"
-          URL_ARM64="$(echo "$JSON" | jq -r '.assets[] | select(.name | test("linux_arm64\\.tar\\.gz$")) | .browser_download_url' | head -n1)"
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "Failed to get release tag"
+            exit 1
+          fi
 
-          [ -n "$URL_AMD64" ] && [ "$URL_AMD64" != "null" ]
-          [ -n "$URL_ARM64" ] && [ "$URL_ARM64" != "null" ]
+          echo "===== Release Assets ====="
+          echo "$JSON" | jq -r '.assets[].name'
+
+          URL_AMD64="$(echo "$JSON" | jq -r '
+            .assets[]
+            | select(
+                (.name | test("linux_amd64\\.tar\\.gz$"))
+                and
+                (.name | contains("no-plugin") | not)
+              )
+            | .browser_download_url
+          ' | head -n1)"
+
+          URL_ARM64="$(echo "$JSON" | jq -r '
+            .assets[]
+            | select(
+                (.name | test("linux_(arm64|aarch64)\\.tar\\.gz$"))
+                and
+                (.name | contains("no-plugin") | not)
+              )
+            | .browser_download_url
+          ' | head -n1)"
+
+          echo "AMD64 URL=$URL_AMD64"
+          echo "ARM64 URL=$URL_ARM64"
+
+          if [ -z "$URL_AMD64" ] || [ "$URL_AMD64" = "null" ]; then
+            echo "Missing AMD64 asset"
+            exit 1
+          fi
+
+          if [ -z "$URL_ARM64" ] || [ "$URL_ARM64" = "null" ]; then
+            echo "Missing ARM64 asset"
+            exit 1
+          fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "url_amd64=$URL_AMD64" >> "$GITHUB_OUTPUT"
           echo "url_arm64=$URL_ARM64" >> "$GITHUB_OUTPUT"
 
           echo "Latest TAG=$TAG"
+
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -46,22 +82,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+
       - name: Skip if this release tag already exists
         id: skip
         run: |
           set -euo pipefail
+
           TAG="${{ steps.rel.outputs.tag }}"
           IMAGE="ghcr.io/${OWNER_LC}/cpa:${TAG}"
 
-          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+
       - name: Set up Docker Buildx
         if: steps.skip.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
+
 
       - name: Generate Dockerfile
         if: steps.skip.outputs.skip != 'true'
@@ -76,49 +116,77 @@ jobs:
           ARG TARGETARCH
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
-                ca-certificates tzdata curl tar bash findutils \
+              ca-certificates \
+              tzdata \
+              curl \
+              tar \
+              bash \
+              findutils \
+              file \
               && rm -rf /var/lib/apt/lists/*
 
           SHELL ["/bin/bash", "-lc"]
 
           ENV TZ=Asia/Shanghai
-          RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+          RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+              && echo $TZ > /etc/timezone
+
 
           RUN set -euxo pipefail; \
               mkdir -p /tmp/app /CPA; \
+              \
               case "$TARGETARCH" in \
                 amd64) url="$URL_AMD64" ;; \
                 arm64) url="$URL_ARM64" ;; \
-                *) echo "Unsupported TARGETARCH=$TARGETARCH" && exit 1 ;; \
+                *) echo "Unsupported TARGETARCH=$TARGETARCH"; exit 1 ;; \
               esac; \
+              \
+              echo "Downloading: $url"; \
               curl -fsSL "$url" -o /tmp/app/app.tar.gz; \
+              \
               tar -xzf /tmp/app/app.tar.gz -C /tmp/app; \
               \
-              bin="$(find /tmp/app -maxdepth 5 -type f -perm -111 | head -n 1)"; \
-              [[ -n "$bin" ]]; \
+              echo "===== Extracted ====="; \
+              find /tmp/app -type f; \
+              \
+              bin="$(find /tmp/app -type f -name "cli-proxy-api" | head -n1)"; \
+              \
+              if [ -z "$bin" ]; then \
+                echo "Binary not found"; \
+                find /tmp/app -ls; \
+                exit 1; \
+              fi; \
+              \
               cp "$bin" /CPA/CPA; \
               chmod +x /CPA/CPA; \
               \
-              # 下载你指定的 config.example.yaml
-              curl -fsSL "https://raw.githubusercontent.com/Misaka009982/Zeabur/refs/heads/main/config/config.example.yaml" \
-                -o /CPA/config.example.yaml; \
+              if [ -f /tmp/app/config.example.yaml ]; then \
+                cp /tmp/app/config.example.yaml /CPA/config.example.yaml; \
+              fi; \
               \
               chown -R 1000:1000 /CPA; \
               rm -rf /tmp/app
 
+
           WORKDIR /CPA
+
           EXPOSE 7860
 
           USER 1000:1000
+
           CMD ["./CPA"]
           EOF
+
 
       - name: Build & push multi-arch
         if: steps.skip.outputs.skip != 'true'
         run: |
           TAG="${{ steps.rel.outputs.tag }}"
+
           URL_AMD64="${{ steps.rel.outputs.url_amd64 }}"
           URL_ARM64="${{ steps.rel.outputs.url_arm64 }}"
+
           IMAGE="ghcr.io/${OWNER_LC}/cpa"
 
           docker buildx build \
