@@ -98,11 +98,6 @@ jobs:
           fi
 
 
-      - name: Set up Docker Buildx
-        if: steps.skip.outputs.skip != 'true'
-        uses: docker/setup-buildx-action@v3
-
-
       - name: Generate Dockerfile
         if: steps.skip.outputs.skip != 'true'
         run: |
@@ -114,60 +109,63 @@ jobs:
           ARG URL_AMD64
           ARG URL_ARM64
           ARG TARGETARCH
+          ARG WORKBUDDY_VERSION=0.8.5
 
           RUN apt-get update && apt-get install -y --no-install-recommends \
               ca-certificates \
-              tzdata \
               curl \
+              unzip \
               tar \
               bash \
               findutils \
-              file \
+              tzdata \
               && rm -rf /var/lib/apt/lists/*
 
-          SHELL ["/bin/bash", "-lc"]
+          SHELL ["/bin/bash","-lc"]
 
           ENV TZ=Asia/Shanghai
 
           RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
-              && echo $TZ > /etc/timezone
-
+           && echo $TZ >/etc/timezone
 
           RUN set -euxo pipefail; \
-              mkdir -p /tmp/app /CPA; \
+              mkdir -p /CPA; \
               \
               case "$TARGETARCH" in \
-                amd64) url="$URL_AMD64" ;; \
-                arm64) url="$URL_ARM64" ;; \
-                *) echo "Unsupported TARGETARCH=$TARGETARCH"; exit 1 ;; \
+                amd64) \
+                  APP_URL="$URL_AMD64"; \
+                  PLUGIN_URL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_amd64.zip"; \
+                  PLUGIN_DIR="/CPA/plugins/linux/amd64"; \
+                  ;; \
+                arm64) \
+                  APP_URL="$URL_ARM64"; \
+                  PLUGIN_URL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_arm64.zip"; \
+                  PLUGIN_DIR="/CPA/plugins/linux/arm64"; \
+                  ;; \
+                *) \
+                  exit 1; \
+                  ;; \
               esac; \
               \
-              echo "Downloading: $url"; \
-              curl -fsSL "$url" -o /tmp/app/app.tar.gz; \
+              mkdir -p /tmp/app "$PLUGIN_DIR"; \
               \
+              curl -fsSL "$APP_URL" -o /tmp/app/app.tar.gz; \
               tar -xzf /tmp/app/app.tar.gz -C /tmp/app; \
               \
-              echo "===== Extracted ====="; \
-              find /tmp/app -type f; \
-              \
-              bin="$(find /tmp/app -type f -name "cli-proxy-api" | head -n1)"; \
-              \
-              if [ -z "$bin" ]; then \
-                echo "Binary not found"; \
-                find /tmp/app -ls; \
-                exit 1; \
-              fi; \
-              \
-              cp "$bin" /CPA/CPA; \
-              chmod +x /CPA/CPA; \
+              APP_BIN="$(find /tmp/app -type f -name 'cli-proxy-api' | head -n1)"; \
+              test -n "$APP_BIN"; \
+              install -m755 "$APP_BIN" /CPA/CPA; \
               \
               if [ -f /tmp/app/config.example.yaml ]; then \
-                cp /tmp/app/config.example.yaml /CPA/config.example.yaml; \
+                  install -m644 /tmp/app/config.example.yaml /CPA/config.example.yaml; \
               fi; \
               \
-              chown -R 1000:1000 /CPA; \
-              rm -rf /tmp/app
-
+              curl -fsSL "$PLUGIN_URL" -o /tmp/plugin.zip; \
+              unzip -j /tmp/plugin.zip '*.so' -d "$PLUGIN_DIR"; \
+              chmod 755 "$PLUGIN_DIR"/*.so; \
+              \
+              rm -rf /tmp/app /tmp/plugin.zip; \
+              chown -R 1000:1000 /CPA
 
           WORKDIR /CPA
 
