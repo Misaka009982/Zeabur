@@ -19,7 +19,7 @@ jobs:
       - name: Checkout upstream repo
         uses: actions/checkout@v4
         with:
-          repository: hkfires/AIStudioBuildWS
+          repository: xyonium/AIStudioBuildWS
           ref: main
           path: upstream
 
