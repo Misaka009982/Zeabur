@@ -12,9 +12,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Set lowercase owner
-        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+        run: |
+          echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Checkout upstream repo
         uses: actions/checkout@v4
@@ -40,32 +42,37 @@ jobs:
       - name: Check if this VERSION already exists in GHCR
         run: |
           set -e
+
           IMAGE="ghcr.io/${OWNER_LC}/aistudiobuildws:${VERSION}"
 
           echo "Checking remote manifest: ${IMAGE}"
+
           if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
-            echo "Image for ${VERSION} already exists. Skip build."
+            echo "Image ${IMAGE} already exists."
             echo "SKIP_BUILD=true" >> $GITHUB_ENV
           else
-            echo "Image for ${VERSION} not found. Will build."
+            echo "Image ${IMAGE} not found."
             echo "SKIP_BUILD=false" >> $GITHUB_ENV
           fi
 
-      - name: Build multi-architecture image
+      - name: Setup Docker Buildx
+        if: env.SKIP_BUILD != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push multi-architecture image
         if: env.SKIP_BUILD != 'true'
         run: |
           IMAGE_BASE="ghcr.io/${OWNER_LC}/aistudiobuildws"
-          docker buildx create --use # Create a new buildx builder if not already created
-          docker buildx build --platform linux/amd64,linux/arm64 -t ${IMAGE_BASE}:${VERSION} -t ${IMAGE_BASE}:latest ./upstream --push
 
-      - name: Push version tag
-        if: env.SKIP_BUILD != 'true'
-        run: |
-          echo "Pushing version tag ${VERSION}"
-          docker push ghcr.io/${OWNER_LC}/aistudiobuildws:${VERSION}
+          echo "Building:"
+          echo "${IMAGE_BASE}:${VERSION}"
+          echo "${IMAGE_BASE}:latest"
 
-      - name: Push latest tag
-        if: env.SKIP_BUILD != 'true'
-        run: |
-          echo "Pushing latest tag"
-          docker push ghcr.io/${OWNER_LC}/aistudiobuildws:latest
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t ${IMAGE_BASE}:${VERSION} \
+            -t ${IMAGE_BASE}:latest \
+            ./upstream \
+            --push
+
+          echo "Build and push completed."
