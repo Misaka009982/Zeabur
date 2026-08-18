@@ -1,0 +1,394 @@
+name: Build opencode2api
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 23 * * *"
+
+concurrency:
+  group: opencode2api-build
+  cancel-in-progress: true
+
+env:
+  REPO: jasonxu114514/opencode2api
+  IMAGE_NAME: opencode2api
+
+  # 直接修改项目默认监听端口
+  API_PORT: "38080"
+  WEBUI_PORT: "38081"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+
+      # ============================================================
+      # 1. 获取上游默认分支和最新 Commit
+      # ============================================================
+      - name: Get latest upstream commit
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${{ env.REPO }}"
+
+          DEFAULT_BRANCH=$(curl -fsSL \
+            "https://api.github.com/repos/${REPO}" \
+            | jq -r '.default_branch')
+
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
+            echo "ERROR: Failed to get default branch"
+            exit 1
+          fi
+
+          COMMIT=$(curl -fsSL \
+            "https://api.github.com/repos/${REPO}/commits/${DEFAULT_BRANCH}" \
+            | jq -r '.sha')
+
+          if [ -z "$COMMIT" ] || [ "$COMMIT" = "null" ]; then
+            echo "ERROR: Failed to get commit"
+            exit 1
+          fi
+
+          SHORT_COMMIT="${COMMIT:0:7}"
+
+          echo "branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "short=${SHORT_COMMIT}" >> "$GITHUB_OUTPUT"
+
+          echo "========================================"
+          echo "Upstream repository : ${REPO}"
+          echo "Branch              : ${DEFAULT_BRANCH}"
+          echo "Commit              : ${COMMIT}"
+          echo "Short commit        : ${SHORT_COMMIT}"
+          echo "========================================"
+
+      # ============================================================
+      # 2. GitHub 用户名转小写
+      # ============================================================
+      - name: Lowercase owner
+        id: owner
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+
+          echo "GHCR owner: ${OWNER}"
+
+      # ============================================================
+      # 3. 检查该 Commit 是否已经构建
+      # ============================================================
+      - name: Check existing image
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.commit.outputs.short }}"
+
+          echo "Checking image:"
+          echo "${IMAGE}"
+
+          if docker manifest inspect "${IMAGE}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image already exists."
+            echo "Skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Image does not exist."
+            echo "Continue build."
+          fi
+
+      # ============================================================
+      # 4. 拉取上游源码
+      # ============================================================
+      - name: Checkout upstream
+        if: steps.check.outputs.exists != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO }}
+          ref: ${{ steps.commit.outputs.commit }}
+          fetch-depth: 1
+
+      # ============================================================
+      # 5. 查看源码结构
+      # ============================================================
+      - name: Show source tree
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          echo "Repository files:"
+          find . -maxdepth 3 -type f \
+            ! -path './.git/*' \
+            | sort \
+            | head -300
+
+      # ============================================================
+      # 6. 查找端口定义
+      #
+      # 不直接粗暴替换所有 8080 / 8081。
+      # 先把相关位置打印出来，方便构建日志确认。
+      # ============================================================
+      - name: Inspect port configuration
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set +e
+
+          echo "========================================"
+          echo "Searching port configuration"
+          echo "========================================"
+
+          grep -RInE \
+            --exclude-dir=.git \
+            --exclude='*.lock' \
+            --exclude='package-lock.json' \
+            --exclude='yarn.lock' \
+            --exclude='pnpm-lock.yaml' \
+            '8080|8081|OPENCODE2API_PORT|OPENCODE2API_WEBUI_PORT' \
+            . \
+            2>/dev/null \
+            | head -300
+
+          true
+
+      # ============================================================
+      # 7. 修改源码端口
+      #
+      # 这里采用“有针对性的文本替换”：
+      #
+      # 8080 -> 38080
+      # 8081 -> 38081
+      #
+      # 排除：
+      # - .git
+      # - lock 文件
+      # - node_modules
+      #
+      # 同时处理常见的：
+      #   PORT=8080
+      #   port: 8080
+      #   port:8080
+      #   :8080
+      #   "8080"
+      #
+      # 不修改 package-lock 等依赖文件。
+      # ============================================================
+      - name: Modify application ports
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "Changing application ports"
+          echo "API    : 8080 -> ${{ env.API_PORT }}"
+          echo "WebUI  : 8081 -> ${{ env.WEBUI_PORT }}"
+          echo "========================================"
+
+          FILES=$(grep -RIlE \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude-dir=dist \
+            --exclude-dir=build \
+            --exclude='package-lock.json' \
+            --exclude='yarn.lock' \
+            --exclude='pnpm-lock.yaml' \
+            '8080|8081|OPENCODE2API_PORT|OPENCODE2API_WEBUI_PORT' \
+            . \
+            2>/dev/null || true)
+
+          if [ -z "$FILES" ]; then
+            echo "ERROR: No files containing target ports were found."
+            exit 1
+          fi
+
+          echo "Files to modify:"
+          echo "$FILES"
+
+          while IFS= read -r FILE; do
+            [ -z "$FILE" ] && continue
+
+            echo "Modifying: $FILE"
+
+            perl -0pi -e \
+              's/(?<![0-9])8080(?![0-9])/38080/g;
+               s/(?<![0-9])8081(?![0-9])/38081/g' \
+              "$FILE"
+
+          done <<< "$FILES"
+
+      # ============================================================
+      # 8. 验证修改结果
+      # ============================================================
+      - name: Verify modified ports
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "Checking remaining 8080 / 8081"
+          echo "========================================"
+
+          REMAINING=$(grep -RInE \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude='package-lock.json' \
+            --exclude='yarn.lock' \
+            --exclude='pnpm-lock.yaml' \
+            '8080|8081' \
+            . \
+            2>/dev/null || true)
+
+          if [ -n "$REMAINING" ]; then
+            echo "WARNING: Some 8080/8081 references remain:"
+            echo "$REMAINING"
+          else
+            echo "No 8080/8081 references remain."
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "Current 38080 / 38081 configuration"
+          echo "========================================"
+
+          grep -RInE \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            '38080|38081' \
+            . \
+            2>/dev/null \
+            | head -300 || true
+
+      # ============================================================
+      # 9. 显示最终 Git diff
+      # ============================================================
+      - name: Show source changes
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Git diff"
+          echo "========================================"
+
+          git diff --stat
+          echo ""
+          git diff -- \
+            ':!package-lock.json' \
+            ':!yarn.lock' \
+            ':!pnpm-lock.yaml'
+
+      # ============================================================
+      # 10. 设置 QEMU
+      # ============================================================
+      - name: Set up QEMU
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      # ============================================================
+      # 11. 设置 Buildx
+      # ============================================================
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # ============================================================
+      # 12. 登录 GHCR
+      # ============================================================
+      - name: Login GHCR
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 13. 检查 Dockerfile
+      # ============================================================
+      - name: Find Dockerfile
+        id: dockerfile
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FILE=$(find . \
+            -type f \
+            -name 'Dockerfile' \
+            -not -path './.git/*' \
+            | head -n 1)
+
+          if [ -z "$FILE" ]; then
+            echo "ERROR: Dockerfile not found"
+            exit 1
+          fi
+
+          echo "file=${FILE}" >> "$GITHUB_OUTPUT"
+
+          echo "Dockerfile:"
+          echo "${FILE}"
+
+      # ============================================================
+      # 14. 构建 amd64 + arm64
+      # ============================================================
+      - name: Build and Push
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dockerfile.outputs.file }}
+
+          push: true
+
+          platforms: |
+            linux/amd64
+            linux/arm64
+
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.commit.outputs.short }}
+            ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:latest
+
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ============================================================
+      # 15. 构建摘要
+      # ============================================================
+      - name: Build Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "opencode2api build summary"
+          echo "========================================"
+
+          echo "Upstream:"
+          echo "  Repository : ${{ env.REPO }}"
+          echo "  Branch     : ${{ steps.commit.outputs.branch }}"
+          echo "  Commit     : ${{ steps.commit.outputs.commit }}"
+
+          echo ""
+          echo "Ports:"
+          echo "  API        : ${{ env.API_PORT }}"
+          echo "  WebUI      : ${{ env.WEBUI_PORT }}"
+
+          echo ""
+          echo "Images:"
+          echo "  ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.commit.outputs.short }}"
+          echo "  ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:latest"
+
+          echo ""
+          echo "Platforms:"
+          echo "  linux/amd64"
+          echo "  linux/arm64"
