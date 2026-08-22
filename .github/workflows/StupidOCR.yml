@@ -1,0 +1,259 @@
+name: Build StupidOCR
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 */6 * * *"
+
+concurrency:
+  group: stupidocr-build
+  cancel-in-progress: true
+
+env:
+  REPO: 81NewArk/StupidOCR
+  IMAGE_NAME: stupidocr
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+
+      # ============================================================
+      # 1. 获取上游最新 Commit
+      # ============================================================
+      - name: Get latest upstream commit
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${{ env.REPO }}"
+
+          echo "Repository: ${REPO}"
+
+          DEFAULT_BRANCH=$(curl -fsSL \
+            "https://api.github.com/repos/${REPO}" \
+            | jq -r '.default_branch')
+
+          if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
+            echo "ERROR: Failed to get default branch"
+            exit 1
+          fi
+
+          COMMIT=$(curl -fsSL \
+            "https://api.github.com/repos/${REPO}/commits/${DEFAULT_BRANCH}" \
+            | jq -r '.sha')
+
+          if [ -z "$COMMIT" ] || [ "$COMMIT" = "null" ]; then
+            echo "ERROR: Failed to get commit"
+            exit 1
+          fi
+
+          SHORT="${COMMIT:0:7}"
+
+          echo "branch=${DEFAULT_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "========================================"
+          echo "Branch : ${DEFAULT_BRANCH}"
+          echo "Commit : ${COMMIT}"
+          echo "Short  : ${SHORT}"
+          echo "========================================"
+
+      # ============================================================
+      # 2. GHCR 用户名小写
+      # ============================================================
+      - name: Get lowercase owner
+        id: owner
+        shell: bash
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+
+          echo "GHCR owner: ${OWNER}"
+
+      # ============================================================
+      # 3. 检查这个 Commit 是否已经构建
+      # ============================================================
+      - name: Check existing image
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}"
+
+          echo "Checking image:"
+          echo "$IMAGE"
+
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+            echo ""
+            echo "Image already exists."
+            echo "Skipping build."
+
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo ""
+            echo "Image does not exist."
+            echo "Build required."
+          fi
+
+      # ============================================================
+      # 4. 拉取上游源码
+      # ============================================================
+      - name: Checkout upstream
+        if: steps.check.outputs.exists != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO }}
+          ref: ${{ steps.upstream.outputs.commit }}
+          fetch-depth: 1
+
+      # ============================================================
+      # 5. 检查项目结构
+      # ============================================================
+      - name: Inspect source
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Repository files"
+          echo "========================================"
+
+          find . \
+            -maxdepth 3 \
+            -type f \
+            ! -path './.git/*' \
+            | sort
+
+          echo ""
+          echo "========================================"
+          echo "Dockerfile"
+          echo "========================================"
+
+          if [ -f Dockerfile ]; then
+            cat Dockerfile
+          else
+            echo "No Dockerfile found."
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "requirements"
+          echo "========================================"
+
+          find . \
+            -maxdepth 2 \
+            -type f \
+            \( \
+              -name 'requirements*.txt' \
+              -o -name 'pyproject.toml' \
+              -o -name 'setup.py' \
+              -o -name 'Pipfile' \
+            \) \
+            -print
+
+      # ============================================================
+      # 6. 设置 QEMU
+      # ============================================================
+      - name: Set up QEMU
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      # ============================================================
+      # 7. 设置 Buildx
+      # ============================================================
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # ============================================================
+      # 8. 登录 GHCR
+      # ============================================================
+      - name: Login GHCR
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 9. 构建 amd64 + arm64
+      # ============================================================
+      - name: Build and Push
+        if: steps.check.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+
+          push: true
+
+          platforms: |
+            linux/amd64
+            linux/arm64
+
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}
+            ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:latest
+
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ============================================================
+      # 10. 检查最终镜像架构
+      # ============================================================
+      - name: Verify multi architecture image
+        if: steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}"
+
+          echo "========================================"
+          echo "Image manifest"
+          echo "========================================"
+
+          docker buildx imagetools inspect "$IMAGE"
+
+      # ============================================================
+      # 11. 输出结果
+      # ============================================================
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "========================================"
+          echo "StupidOCR Build Summary"
+          echo "========================================"
+
+          echo ""
+          echo "Upstream:"
+          echo "  Repository : ${{ env.REPO }}"
+          echo "  Branch     : ${{ steps.upstream.outputs.branch }}"
+          echo "  Commit     : ${{ steps.upstream.outputs.commit }}"
+
+          echo ""
+          echo "Images:"
+          echo "  ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}"
+          echo "  ghcr.io/${{ steps.owner.outputs.owner }}/${{ env.IMAGE_NAME }}:latest"
+
+          echo ""
+          echo "Platforms:"
+          echo "  linux/amd64"
+          echo "  linux/arm64"
