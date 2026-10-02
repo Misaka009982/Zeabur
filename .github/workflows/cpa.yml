@@ -66,27 +66,24 @@ jobs:
           ARG URL_AMD64
           ARG URL_ARM64
           ARG TARGETARCH
-          ARG WORKBUDDY_VERSION=0.8.5
-          RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip tar bash findutils tzdata && rm -rf /var/lib/apt/lists/*
+          RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tar bash findutils tzdata && rm -rf /var/lib/apt/lists/*
           SHELL ["/bin/bash","-lc"]
           ENV TZ=Asia/Shanghai
           RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
           RUN set -eux; \
             case "$TARGETARCH" in \
-              amd64) APP_URL="$URL_AMD64"; PURL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_amd64.zip"; PDIR=/CPA/plugins/linux/amd64;; \
-              arm64) APP_URL="$URL_ARM64"; PURL="https://github.com/Sliverkiss/cpa-plugin/releases/download/workbuddy-v${WORKBUDDY_VERSION}/workbuddy_${WORKBUDDY_VERSION}_linux_arm64.zip"; PDIR=/CPA/plugins/linux/arm64;; \
+              amd64) APP_URL="$URL_AMD64";; \
+              arm64) APP_URL="$URL_ARM64";; \
+              *) echo "Unsupported TARGETARCH: $TARGETARCH"; exit 1;; \
             esac; \
-            mkdir -p /CPA "$PDIR" /tmp/app; \
+            mkdir -p /CPA /tmp/app; \
             curl -fsSL "$APP_URL" -o /tmp/app/app.tar.gz; \
             tar -xzf /tmp/app/app.tar.gz -C /tmp/app; \
-            install -m755 "$(find /tmp/app -type f -name cli-proxy-api|head -n1)" /CPA/CPA; \
+            install -m755 "$(find /tmp/app -type f -name cli-proxy-api | head -n1)" /CPA/CPA; \
             [ -f /tmp/app/config.example.yaml ] && install -m644 /tmp/app/config.example.yaml /CPA/config.example.yaml || true; \
-            curl -fsSL "$PURL" -o /tmp/plugin.zip; \
-            unzip -j /tmp/plugin.zip '*.so' -d "$PDIR"; \
-            chmod 755 "$PDIR"/*.so; \
             chown -R 1000:1000 /CPA
           WORKDIR /CPA
-          EXPOSE 7860
+          EXPOSE 8317
           USER 1000:1000
           CMD ["./CPA"]
           EOF
