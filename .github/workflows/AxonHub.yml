@@ -15,6 +15,7 @@ concurrency:
 
 env:
   SOURCE_REPO: Misaka009982/axonhub
+  SOURCE_BRANCH: main
   IMAGE_NAME: axonhub
 
 jobs:
@@ -27,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          api="https://api.github.com/repos/${SOURCE_REPO}"
-          branch="$(curl -fsSL "$api" | jq -er '.default_branch')"
-          commit="$(curl -fsSL "$api/commits/$branch" | jq -er '.sha')"
+          branch="main"
+          api="https://api.github.com/repos/${SOURCE_REPO}/commits/${branch}"
+          commit="$(curl -fsSL "$api" | jq -er '.sha')"
 
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
