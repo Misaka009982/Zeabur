@@ -1,10 +1,10 @@
 # InkOS Package
 
 Generated from private repo: Misaka009982/inkos
-Built at: 2026-11-27T11:17:42Z
+Built at: 2026-11-28T02:15:36Z
 
 Packages:
-../package-repo/packages/misaka009982-inkos-1.15.10.tgz
+../package-repo/packages/misaka009982-inkos-1.15.11.tgz
 ../package-repo/packages/misaka009982-inkos-latest.tgz
 
 ## 按需安装
